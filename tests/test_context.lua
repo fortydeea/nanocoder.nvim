@@ -1,0 +1,128 @@
+-- Context assembly, file adds, tree-path parsing, and prompt sending.
+local config = require("nanocoder.config")
+local context = require("nanocoder.context")
+local protocol = require("nanocoder.protocol")
+local client = require("nanocoder.client")
+
+-- Capture what would be sent to the companion.
+local sent = {}
+local function capture()
+  sent = {}
+  client.send = function(msg)
+    sent[#sent + 1] = msg
+    return true
+  end
+end
+
+test("prompt_context includes file, cursor, and selection", function()
+  capture()
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "line one", "line two", "line three" })
+  vim.api.nvim_buf_set_name(buf, "/tmp/ctx-test.lua")
+  vim.api.nvim_set_current_buf(buf)
+
+  local ctx = context.prompt_context({ start_line = 0, end_line = 1 })
+  eq("/tmp/ctx-test.lua", ctx.filePath)
+  eq("ctx-test.lua", ctx.fileName)
+  eq("line one\nline two", ctx.selection)
+  eq(0, ctx.startLine)
+  eq(1, ctx.endLine)
+  eq("number", type(ctx.cursorPosition.line))
+
+  vim.api.nvim_buf_delete(buf, { force = true })
+end)
+
+test("prompt_context omits selection when no range given", function()
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "a", "b" })
+  vim.api.nvim_buf_set_name(buf, "/tmp/ctx-nosel.lua")
+  vim.api.nvim_set_current_buf(buf)
+  local ctx = context.prompt_context({})
+  eq(nil, ctx.selection)
+  eq(nil, ctx.startLine)
+  vim.api.nvim_buf_delete(buf, { force = true })
+end)
+
+test("prompt_context is empty for unnamed buffers", function()
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_set_current_buf(buf)
+  local ctx = context.prompt_context({})
+  eq(nil, ctx.filePath)
+  vim.api.nvim_buf_delete(buf, { force = true })
+end)
+
+test("send_prompt builds a protocol message with context", function()
+  capture()
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "alpha", "beta" })
+  vim.api.nvim_buf_set_name(buf, "/tmp/ctx-send.lua")
+  vim.api.nvim_set_current_buf(buf)
+
+  eq(true, context.send_prompt("fix this", { start_line = 0, end_line = 1 }))
+  eq(1, #sent)
+  eq("send_prompt", sent[1].type)
+  eq("fix this", sent[1].prompt)
+  eq("alpha\nbeta", sent[1].context.selection)
+  vim.api.nvim_buf_delete(buf, { force = true })
+end)
+
+test("add_file sends context and active_editor messages", function()
+  capture()
+  context.clear()
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "x", "y", "z" })
+  vim.api.nvim_buf_set_name(buf, "/tmp/ctx-add.lua")
+  vim.api.nvim_set_current_buf(buf)
+
+  eq(true, context.add_file("/tmp/ctx-add.lua", 0, 1))
+  eq(2, #sent)
+  eq("context", sent[1].type)
+  eq("active_editor", sent[2].type)
+  ok(vim.tbl_contains(sent[1].openFiles, "/tmp/ctx-add.lua"), "openFiles should list the added file")
+  eq("/tmp/ctx-add.lua", sent[2].filePath)
+  eq("x\ny", sent[2].selection)
+
+  vim.api.nvim_buf_delete(buf, { force = true })
+  context.clear()
+end)
+
+test("add_file accumulates multiple files in openFiles", function()
+  capture()
+  context.clear()
+  context.add_file("/tmp/a.lua") -- sends context + active_editor
+  context.add_file("/tmp/b.lua") -- sends context + active_editor
+  eq(4, #sent)
+  local last_context = sent[3]
+  eq("context", last_context.type)
+  eq(2, #last_context.openFiles)
+  context.clear()
+end)
+
+test("path_from_tree_line: absolute paths", function()
+  eq("/home/me/proj/src/main.lua", context.path_from_tree_line("  /home/me/proj/src/main.lua"))
+end)
+
+test("path_from_tree_line: netrw-style entries", function()
+  eq(vim.fn.fnamemodify("./lua/nanocoder/init.lua", ":p"),
+    context.path_from_tree_line("rw-r--r--  1 me  staff  1234  Jan  1 00:00 ./lua/nanocoder/init.lua"))
+end)
+
+test("path_from_tree_line: no path yields nil", function()
+  eq(nil, context.path_from_tree_line("just some text"))
+  eq(nil, context.path_from_tree_line(""))
+end)
+
+test("send_selection sends the marked range", function()
+  capture()
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "sel one", "sel two" })
+  vim.api.nvim_buf_set_name(buf, "/tmp/ctx-vis.lua")
+  vim.api.nvim_set_current_buf(buf)
+  vim.fn.setpos("'<", { buf, 1, 1, 0 })
+  vim.fn.setpos("'>", { buf, 2, 1, 0 })
+
+  eq(true, context.send_selection())
+  eq(1, #sent)
+  ok(sent[1].prompt:find("sel one", 1, true), "prompt should contain the selection")
+  vim.api.nvim_buf_delete(buf, { force = true })
+end)

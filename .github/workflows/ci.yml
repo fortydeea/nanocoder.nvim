@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        neovim: [v0.8.3, stable, nightly]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Neovim ${{ matrix.neovim }}
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.neovim }}
+
+      - name: Install nanocoder CLI
+        run: npm install -g @nanocollective/nanocoder
+
+      - name: Run tests
+        run: nvim --headless -c "luafile tests/run.lua" -c "qa!"
