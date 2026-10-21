@@ -60,6 +60,7 @@ local files = {
   "tests/test_handlers.lua",
   "tests/test_diff.lua",
   "tests/test_health.lua",
+  "tests/test_log.lua",
 }
 
 for _, file in ipairs(files) do
