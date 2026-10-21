@@ -1,0 +1,356 @@
+-- Terminal integration: run the nanocoder CLI inside Neovim (or externally).
+-- Providers: "native" (built-in :terminal), "external" (spawn a terminal app),
+-- "none" (no terminal at all), or a custom table implementing the provider API.
+local config = require("nanocoder.config")
+local log = require("nanocoder.log")
+
+local M = {}
+
+-- Resolved provider state, owned by setup().
+local state = {
+  provider = nil,
+  provider_name = nil,
+  bufnr = nil,
+  winid = nil,
+  job_id = nil,
+  cmd = nil,
+  args = nil,
+}
+
+---Launch arguments for the CLI. `nanocoder --vscode` starts the companion
+---WebSocket server the plugin then dials into.
+---@param cfg table|nil
+---@return string[] argv
+function M.build_cli_argv(cfg)
+  cfg = cfg or config.get()
+  local argv = { cfg.terminal_cmd or "nanocoder", "--vscode" }
+  return argv
+end
+
+--------------------------------------------------------------
+-- Native provider: a built-in :terminal buffer in a split.
+--------------------------------------------------------------
+
+local native = {}
+
+function native.is_available()
+  return true
+end
+
+---Open the CLI in a native terminal split.
+---@param cfg table
+---@param focus boolean|nil
+---@return boolean opened
+function native.open(cfg, focus)
+  if M.is_open() then
+    return true
+  end
+
+  local term = cfg.terminal
+  local cmd = state.cmd or M.build_cli_argv(cfg)
+  local cwd = config.effective_cwd(cfg)
+
+  vim.cmd("botright split")
+  local win = vim.api.nvim_get_current_win()
+  local height = math.floor(vim.o.lines * (term.split_height_percentage or 0.4))
+  vim.api.nvim_win_set_height(win, math.max(height, 3))
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_win_set_buf(win, buf)
+
+  local job_id
+  if vim.fn.exists("*termopen") == 1 then
+    job_id = vim.fn.termopen(cmd, { cwd = cwd })
+  else
+    job_id = vim.fn.jobstart(cmd, { cwd = cwd, term = true })
+  end
+  if job_id <= 0 then
+    log.error("failed to start terminal job: " .. table.concat(cmd, " "))
+    vim.api.nvim_win_close(win, true)
+    return false
+  end
+
+  state.bufnr = buf
+  state.winid = win
+  state.job_id = job_id
+
+  if term.auto_insert and focus ~= false then
+    vim.cmd("startinsert")
+  end
+  log.debug("terminal opened (job " .. job_id .. ")")
+  return true
+end
+
+function native.close()
+  if state.winid and vim.api.nvim_win_is_valid(state.winid) then
+    vim.api.nvim_win_close(state.winid, true)
+  end
+  state.winid = nil
+end
+
+function native.focus()
+  if state.winid and vim.api.nvim_win_is_valid(state.winid) then
+    vim.api.nvim_set_current_win(state.winid)
+    if config.get().terminal.auto_insert then
+      vim.cmd("startinsert")
+    end
+    return true
+  end
+  return false
+end
+
+function native.is_open()
+  return state.winid ~= nil and vim.api.nvim_win_is_valid(state.winid)
+end
+
+---Write text to the terminal job channel.
+---@param text string
+---@param submit boolean append "\r" to submit
+---@return boolean ok
+function native.send_text(text, submit)
+  if not state.job_id then
+    return false
+  end
+  local payload = text .. (submit and "\r" or "")
+  local ok = pcall(vim.api.nvim_chan_send, state.job_id, payload)
+  return ok and true or false
+end
+
+function native.get_bufnr()
+  return state.bufnr
+end
+
+--------------------------------------------------------------
+-- External provider: spawn a terminal application outside Neovim.
+--------------------------------------------------------------
+
+local external = {}
+
+function external.is_available(cfg)
+  local opts = (cfg and cfg.terminal and cfg.terminal.provider_opts) or {}
+  return opts.external_terminal_cmd ~= nil
+end
+
+---Build the command for an external terminal.
+---Accepts a string template (`%s` = CLI command) or a function(cmd, env).
+---@param cfg table
+---@param cli_argv string[]
+---@return string[]|nil argv
+local function external_argv(cfg, cli_argv)
+  local opts = cfg.terminal.provider_opts or {}
+  local tmpl = opts.external_terminal_cmd
+  local cli_str = table.concat(cli_argv, " ")
+  if type(tmpl) == "function" then
+    local ok, result = pcall(tmpl, cli_str, { cwd = config.effective_cwd(cfg) })
+    if not ok then
+      log.error("external_terminal_cmd function failed: " .. tostring(result))
+      return nil
+    end
+    if type(result) == "string" then
+      return { result }
+    end
+    return result
+  end
+  if type(tmpl) == "string" then
+    -- Support both `%s` (command) and two `%s` (cwd, command) templates.
+    local cwd = config.effective_cwd(cfg)
+    local cmd = tmpl
+    local first = cmd:find("%%s", 1, true)
+    if first then
+      local second = cmd:find("%%s", first + 3, true)
+      if second then
+        cmd = cmd:gsub("%%s", cwd, 1):gsub("%%s", cli_str, 1)
+      else
+        cmd = cmd:gsub("%%s", cli_str, 1)
+      end
+    end
+    return { cmd }
+  end
+  return nil
+end
+
+function external.open(cfg)
+  local argv = external_argv(cfg, state.cmd or M.build_cli_argv(cfg))
+  if not argv then
+    log.error("external provider: no external_terminal_cmd configured")
+    return false
+  end
+  local ok, err = pcall(function()
+    vim.fn.jobstart(argv, { detach = true, cwd = config.effective_cwd(cfg) })
+  end)
+  if not ok then
+    log.error("external provider failed to spawn: " .. tostring(err))
+    return false
+  end
+  return true
+end
+
+function external.close()
+  -- External terminals are managed by the user's terminal application.
+end
+
+function external.focus()
+  return false
+end
+
+function external.is_open()
+  return false
+end
+
+function external.send_text()
+  log.warn("external provider cannot receive typed text; run prompts in the external terminal")
+  return false
+end
+
+--------------------------------------------------------------
+-- None provider: no terminal management at all.
+--------------------------------------------------------------
+
+local none = {
+  is_available = function()
+    return true
+  end,
+  open = function()
+    log.info("terminal provider is 'none'; start `nanocoder --vscode` yourself")
+    return false
+  end,
+  close = function() end,
+  focus = function()
+    return false
+  end,
+  is_open = function()
+    return false
+  end,
+  send_text = function()
+    log.warn("terminal provider is 'none'; there is no pane to type into")
+    return false
+  end,
+}
+
+--------------------------------------------------------------
+-- Public terminal API (dispatches to the active provider).
+--------------------------------------------------------------
+
+local BUILTIN = {
+  native = native,
+  external = external,
+  none = none,
+}
+
+---Select the provider from config and return it.
+---@param cfg table
+---@return table provider
+local function resolve_provider(cfg)
+  local name = cfg.terminal and cfg.terminal.provider or "native"
+  if type(name) == "table" then
+    -- Custom provider table: require the API surface we call.
+    for _, fn in ipairs({ "open", "close", "focus", "is_open" }) do
+      if type(name[fn]) ~= "function" then
+        error("[nanocoder] custom terminal provider missing function: " .. fn)
+      end
+    end
+    return name
+  end
+  return BUILTIN[name] or BUILTIN.native
+end
+
+---Initialize the terminal layer (called from setup()).
+---@param cfg table
+function M.setup(cfg)
+  state.provider = resolve_provider(cfg)
+  state.provider_name = type(cfg.terminal.provider) == "table" and "custom" or cfg.terminal.provider
+  if state.provider_name == "external" and not external.is_available(cfg) then
+    log.warn("external terminal provider selected but provider_opts.external_terminal_cmd is unset; falling back to native")
+    state.provider = BUILTIN.native
+    state.provider_name = "native"
+  end
+end
+
+---Override the CLI launch command (used by :NanocoderSelectModel).
+---@param argv string[]
+function M.set_cli_argv(argv)
+  state.cmd = argv
+end
+
+---@return string[]|nil argv
+function M.get_cli_argv()
+  return state.cmd
+end
+
+---Open the terminal (idempotent).
+---@param focus boolean|nil
+---@return boolean
+function M.open(focus)
+  local cfg = config.get()
+  return state.provider.open(cfg, focus)
+end
+
+---Close the terminal window (the job keeps running).
+function M.close()
+  state.provider.close()
+end
+
+---Focus the terminal window when it is open.
+---@return boolean focused
+function M.focus()
+  return state.provider.focus()
+end
+
+---Toggle terminal visibility: open when closed, focus when already open,
+---close when focused.
+---@return boolean
+function M.toggle()
+  if not state.provider.is_open() then
+    return M.open(true)
+  end
+  local win = state.winid
+  if win and vim.api.nvim_get_current_win() == win then
+    M.close()
+    return false
+  end
+  return M.focus()
+end
+
+---@return boolean
+function M.is_open()
+  return state.provider.is_open()
+end
+
+---@return boolean
+function M.is_running()
+  return state.job_id ~= nil
+end
+
+---Type text into the terminal pane.
+---@param text string
+---@param submit boolean|nil append Enter (default true)
+---@return boolean
+function M.send_text(text, submit)
+  if submit == nil then
+    submit = true
+  end
+  return state.provider.send_text(text, submit)
+end
+
+---@return integer|nil bufnr
+function M.get_bufnr()
+  return state.bufnr
+end
+
+---Stop the terminal job (used by :NanocoderStop).
+function M.stop_job()
+  if state.job_id then
+    pcall(vim.fn.jobstop, state.job_id)
+    state.job_id = nil
+    state.bufnr = nil
+    state.winid = nil
+    log.debug("terminal job stopped")
+  end
+end
+
+---@return string provider name for diagnostics
+function M.get_provider_name()
+  return state.provider_name or "native"
+end
+
+return M
