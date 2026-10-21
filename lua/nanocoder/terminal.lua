@@ -50,10 +50,16 @@ function native.open(cfg, focus)
   local cmd = state.cmd or M.build_cli_argv(cfg)
   local cwd = config.effective_cwd(cfg)
 
-  vim.cmd("botright split")
+  local direction = term.split_direction or "botright"
+  vim.cmd(direction .. " split")
   local win = vim.api.nvim_get_current_win()
-  local height = math.floor(vim.o.lines * (term.split_height_percentage or 0.4))
-  vim.api.nvim_win_set_height(win, math.max(height, 3))
+  if direction:find("vert", 1, true) then
+    local width = math.floor(vim.o.columns * (term.split_width_percentage or 0.4))
+    vim.api.nvim_win_set_width(win, math.max(width, 10))
+  else
+    local height = math.floor(vim.o.lines * (term.split_height_percentage or 0.4))
+    vim.api.nvim_win_set_height(win, math.max(height, 3))
+  end
 
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_win_set_buf(win, buf)

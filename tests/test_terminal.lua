@@ -91,3 +91,33 @@ test("native provider opens a real terminal and sends text", function()
   terminal.stop_job()
   eq(false, terminal.is_running())
 end)
+
+test("native provider defaults to a right-side vertical split", function()
+  config.setup({})
+  terminal.setup(config.get())
+  terminal.set_cli_argv({ "sh", "-c", "while true; do sleep 1; done" })
+
+  local cols = vim.o.columns
+  eq(true, terminal.open(false))
+  local win = vim.api.nvim_get_current_win()
+  local width = vim.api.nvim_win_get_width(win)
+  _G.ok(width < cols, "split should be narrower than the full editor: " .. width .. "/" .. cols)
+  _G.ok(vim.api.nvim_win_get_height(win) >= vim.o.lines - 4, "vertical split should be full height")
+  terminal.close()
+  terminal.stop_job()
+end)
+
+test("native provider honors split_direction = botright (horizontal)", function()
+  config.setup({ terminal = { split_direction = "botright", split_height_percentage = 0.4 } })
+  terminal.setup(config.get())
+  terminal.set_cli_argv({ "sh", "-c", "while true; do sleep 1; done" })
+
+  local lines = vim.o.lines
+  eq(true, terminal.open(false))
+  local win = vim.api.nvim_get_current_win()
+  local height = vim.api.nvim_win_get_height(win)
+  _G.ok(height < lines, "split should be shorter than the full editor: " .. height .. "/" .. lines)
+  terminal.close()
+  terminal.stop_job()
+  config.setup({})
+end)
