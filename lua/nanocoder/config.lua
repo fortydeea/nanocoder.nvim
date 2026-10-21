@@ -20,8 +20,8 @@ M.defaults = {
   },
   terminal = {
     provider = "native", -- "native" | "external" | "none" | custom table
-    split_direction = "botright",
-    split_width_percentage = nil,
+    split_direction = "vert botright", -- any :split modifiers, e.g. "botright"
+    split_width_percentage = 0.4,
     split_height_percentage = 0.4,
     focus_after_send = true,
     auto_insert = true,

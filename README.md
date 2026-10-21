@@ -120,7 +120,9 @@ require("nanocoder").setup({
   },
   terminal = {
     provider = "native",       -- "native"|"external"|"none"|custom-table
-    split_height_percentage = 0.4,
+    split_direction = "vert botright",  -- :split modifiers ("botright" for bottom)
+    split_width_percentage = 0.4,
+    split_height_percentage = 0.4,  -- used for horizontal splits
     focus_after_send = true,
     auto_insert = true,
     provider_opts = {
