@@ -188,6 +188,11 @@ Tests run headlessly with no extra tooling:
 nvim --headless -c "luafile tests/run.lua" -c "qa!"
 ```
 
+## Limitations
+
+This project interfaces with nanocoder's vscode support.
+If you do not have a vscode in your path, you may get a warning message during startup.
+
 ## License
 
 MIT
