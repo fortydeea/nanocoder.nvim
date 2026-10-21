@@ -49,9 +49,13 @@ local function write(level, msg)
   end
 
   -- Only warnings and errors reach the user; the rest belongs in the file.
+  -- vim.notify hits nvim_echo, which is illegal in fast events (uv callbacks):
+  -- defer to the main loop in every context.
   if level == "warn" or level == "error" then
     local notify_level = level == "error" and vim.log.levels.ERROR or vim.log.levels.WARN
-    vim.notify(line, notify_level)
+    vim.schedule(function()
+      vim.notify(line, notify_level)
+    end)
   end
 end
 
