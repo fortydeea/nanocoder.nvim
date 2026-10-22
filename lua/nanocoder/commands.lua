@@ -121,15 +121,29 @@ function M.setup()
 
   create("NanocoderSelectModel", function()
     vim.ui.input({ prompt = "provider (empty for default): " }, function(provider)
+      if provider == nil then
+        return -- cancelled: keep the running terminal untouched
+      end
       vim.ui.input({ prompt = "model (empty for default): " }, function(model)
-        local argv = { "nanocoder", "--vscode" }
-        if provider and provider ~= "" then
+        if model == nil then
+          return -- cancelled: keep the running terminal untouched
+        end
+        local argv = terminal.build_cli_argv()
+        if provider ~= "" then
           argv[#argv + 1] = "--provider"
           argv[#argv + 1] = provider
         end
-        if model and model ~= "" then
+        if model ~= "" then
           argv[#argv + 1] = "--model"
           argv[#argv + 1] = model
+        end
+        local current = terminal.get_cli_argv() or terminal.build_cli_argv()
+        if vim.deep_equal(current, argv) then
+          log.info("model selection unchanged: " .. table.concat(argv, " "))
+          if not terminal.is_running() then
+            nanocoder.start()
+          end
+          return
         end
         terminal.set_cli_argv(argv)
         log.info("relaunching with: " .. table.concat(argv, " "))
