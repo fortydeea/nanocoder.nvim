@@ -22,6 +22,9 @@ local state = {
   reconnect_attempts = 0,
   reconnect_timer = nil,
   stopping = false,
+  -- Set after reset(): while true, connect churn is expected (the freshly
+  -- launched CLI may not be listening yet) and stays out of vim.notify.
+  grace = false,
 }
 
 -- Message handlers, keyed by protocol message type.
@@ -218,13 +221,30 @@ function M.connect(info)
   state.handshaking = true
   state.parser = ws.new_parser()
 
+  -- Callbacks may fire after a later connect() replaced state.sock (e.g. a
+  -- relaunch); only the socket they were created for may touch shared state.
+  local function current()
+    return state.sock == sock
+  end
+
   local key = ws.generate_key()
   local host = "127.0.0.1"
 
   sock:connect(host, info.port, function(connect_err)
+    if not current() then
+      return
+    end
     if connect_err then
-      log.warn("connect failed on " .. host .. ":" .. tostring(info.port) .. ": " .. connect_err)
+      local msg = "connect failed on " .. host .. ":" .. tostring(info.port) .. ": " .. connect_err
+      if state.grace then
+        log.debug(msg)
+      else
+        log.warn(msg)
+      end
       vim.schedule(function()
+        if not current() then
+          return
+        end
         cleanup_socket()
         schedule_reconnect()
       end)
@@ -236,9 +256,20 @@ function M.connect(info)
 
     local buffer = ""
     sock:read_start(function(read_err, chunk)
+      if not current() then
+        return
+      end
       if read_err then
-        log.warn("socket read error: " .. tostring(read_err))
+        local msg = "socket read error: " .. tostring(read_err)
+        if state.grace then
+          log.debug(msg)
+        else
+          log.warn(msg)
+        end
         vim.schedule(function()
+          if not current() then
+            return
+          end
           cleanup_socket()
           schedule_reconnect()
         end)
@@ -247,6 +278,9 @@ function M.connect(info)
       if not chunk then -- EOF
         log.debug("companion closed the socket")
         vim.schedule(function()
+          if not current() then
+            return
+          end
           cleanup_socket()
           schedule_reconnect()
         end)
@@ -273,11 +307,15 @@ function M.connect(info)
         end
         state.handshaking = false
         state.reconnect_attempts = 0
+        state.grace = false
         set_connected(true)
         log.info("connected to nanocoder companion (port " .. tostring(info.port) .. ")")
 
         if leftover and #leftover > 0 then
           vim.schedule(function()
+            if not current() then
+              return
+            end
             local events = state.parser.feed(leftover)
             for _, e in ipairs(events) do
               handle_ws_event(e)
@@ -289,6 +327,9 @@ function M.connect(info)
 
       local events = state.parser.feed(chunk)
       vim.schedule(function()
+        if not current() then
+          return
+        end
         for _, e in ipairs(events) do
           handle_ws_event(e)
         end
@@ -313,10 +354,13 @@ function M.disconnect()
   log.info("disconnected from nanocoder companion")
 end
 
----Reset the reconnect budget after a manual (re)start.
+---Reset the reconnect budget after a manual (re)start. Enters the grace window:
+---connect churn right after a relaunch is expected and stays out of vim.notify
+---until a handshake succeeds (see the connect callback).
 function M.reset()
   state.reconnect_attempts = 0
   state.stopping = false
+  state.grace = true
 end
 
 return M
