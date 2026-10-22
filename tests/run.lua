@@ -55,6 +55,7 @@ local files = {
   "tests/test_protocol.lua",
   "tests/test_config.lua",
   "tests/test_terminal.lua",
+  "tests/test_commands.lua",
   "tests/test_setup.lua",
   "tests/test_context.lua",
   "tests/test_handlers.lua",
