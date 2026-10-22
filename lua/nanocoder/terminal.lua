@@ -37,30 +37,67 @@ function native.is_available()
   return true
 end
 
----Open the CLI in a native terminal split.
+---True when a job id refers to a job that has not exited yet.
+---@param job_id integer|nil
+---@return boolean
+local function job_alive(job_id)
+  if not job_id then
+    return false
+  end
+  -- jobwait with timeout 0 returns -1 for a job still running.
+  return vim.fn.jobwait({ job_id }, 0)[1] == -1
+end
+
+---Open the CLI in a native terminal split. Reuses the existing window and a
+---still-running job where possible so a relaunch never stacks a second split.
 ---@param cfg table
 ---@param focus boolean|nil
 ---@return boolean opened
 function native.open(cfg, focus)
-  if M.is_open() then
+  local term = cfg.terminal
+  local alive = job_alive(state.job_id)
+
+  -- Window open and job running: nothing to do.
+  if M.is_open() and alive then
     return true
   end
 
-  local term = cfg.terminal
-  local cmd = state.cmd or M.build_cli_argv(cfg)
-  local cwd = config.effective_cwd(cfg)
-
-  local direction = term.split_direction or "botright"
-  vim.cmd(direction .. " split")
-  local win = vim.api.nvim_get_current_win()
-  if direction:find("vert", 1, true) then
-    local width = math.floor(vim.o.columns * (term.split_width_percentage or 0.4))
-    vim.api.nvim_win_set_width(win, math.max(width, 10))
-  else
-    local height = math.floor(vim.o.lines * (term.split_height_percentage or 0.4))
-    vim.api.nvim_win_set_height(win, math.max(height, 3))
+  -- Reuse the existing window when its job died, otherwise open a split.
+  local win, created = state.winid, false
+  if not (win and vim.api.nvim_win_is_valid(win)) then
+    local direction = term.split_direction or "botright"
+    vim.cmd(direction .. " split")
+    win = vim.api.nvim_get_current_win()
+    created = true
+    if direction:find("vert", 1, true) then
+      local width = math.floor(vim.o.columns * (term.split_width_percentage or 0.4))
+      vim.api.nvim_win_set_width(win, math.max(width, 10))
+    else
+      local height = math.floor(vim.o.lines * (term.split_height_percentage or 0.4))
+      vim.api.nvim_win_set_height(win, math.max(height, 3))
+    end
   end
 
+  -- Window closed but the job still runs: show that buffer again.
+  if alive and state.bufnr and vim.api.nvim_buf_is_valid(state.bufnr) then
+    vim.api.nvim_win_set_buf(win, state.bufnr)
+    state.winid = win
+    if term.auto_insert and focus ~= false then
+      vim.cmd("startinsert")
+    end
+    log.debug("terminal reattached (job " .. tostring(state.job_id) .. ")")
+    return true
+  end
+
+  -- An exited job's buffer is dead weight; drop it before spawning a new CLI.
+  if state.bufnr and vim.api.nvim_buf_is_valid(state.bufnr) then
+    pcall(vim.api.nvim_buf_delete, state.bufnr, { force = true })
+    state.bufnr = nil
+    state.job_id = nil
+  end
+
+  local cmd = state.cmd or M.build_cli_argv(cfg)
+  local cwd = config.effective_cwd(cfg)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_win_set_buf(win, buf)
 
@@ -72,7 +109,9 @@ function native.open(cfg, focus)
   end
   if job_id <= 0 then
     log.error("failed to start terminal job: " .. table.concat(cmd, " "))
-    vim.api.nvim_win_close(win, true)
+    if created then
+      vim.api.nvim_win_close(win, true)
+    end
     return false
   end
 
@@ -324,7 +363,7 @@ end
 
 ---@return boolean
 function M.is_running()
-  return state.job_id ~= nil
+  return job_alive(state.job_id)
 end
 
 ---Type text into the terminal pane.
@@ -343,15 +382,21 @@ function M.get_bufnr()
   return state.bufnr
 end
 
----Stop the terminal job (used by :NanocoderStop).
+---Stop the terminal job and clear the pane it ran in (used by :NanocoderStop).
 function M.stop_job()
   if state.job_id then
     pcall(vim.fn.jobstop, state.job_id)
-    state.job_id = nil
-    state.bufnr = nil
-    state.winid = nil
-    log.debug("terminal job stopped")
   end
+  if state.winid and vim.api.nvim_win_is_valid(state.winid) then
+    pcall(vim.api.nvim_win_close, state.winid, true)
+  end
+  if state.bufnr and vim.api.nvim_buf_is_valid(state.bufnr) then
+    pcall(vim.api.nvim_buf_delete, state.bufnr, { force = true })
+  end
+  state.job_id = nil
+  state.bufnr = nil
+  state.winid = nil
+  log.debug("terminal job stopped")
 end
 
 ---@return string provider name for diagnostics

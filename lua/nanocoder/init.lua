@@ -70,9 +70,9 @@ end
 function M.start()
   local terminal = require("nanocoder.terminal")
   local client = require("nanocoder.client")
-  if not terminal.is_open() then
-    terminal.open(false)
-  end
+  -- open() is idempotent: it reattaches to a live job and revives a dead pane
+  -- in place instead of stacking a second split.
+  terminal.open(false)
   client.reset()
   client.connect()
 end
