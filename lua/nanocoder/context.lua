@@ -208,7 +208,9 @@ function M.path_from_tree_line(line)
   return nil
 end
 
----Send a visual selection as a prompt to the CLI.
+---Prefill the terminal with an `@file#L{n}-L{m}` reference for the selection
+---(claudecode.nvim style) without submitting, so the user types the rest of
+---the instruction after it.
 ---Prefers an explicit range (from :'<,'>NanocoderSend); otherwise uses the
 ---live visual selection, then the '<'/'> marks from a completed selection.
 ---@param start_line number|nil 0-based, inclusive
@@ -233,12 +235,24 @@ function M.send_selection(start_line, end_line)
     log.warn("send_selection: no visual selection")
     return false
   end
-  local bufnr = vim.api.nvim_get_current_buf()
-  local lines = vim.api.nvim_buf_get_lines(bufnr, start_line, end_line + 1, false)
-  local selection = table.concat(lines, "\n")
-  local prompt = "Please consider this selection:\n\n```\n" .. selection .. "\n```"
-  -- Range is passed so the context carries the selection's line metadata.
-  return M.send_prompt(prompt, { start_line = start_line, end_line = end_line })
+  local path = vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
+  if path == "" then
+    log.warn("send_selection: buffer has no file name")
+    return false
+  end
+  -- Line numbers in the reference notation are 1-based.
+  local ref = string.format("@%s#L%d-L%d ", vim.fn.fnamemodify(path, ":."), start_line + 1, end_line + 1)
+  if not terminal.is_open() and not terminal.open(true) then
+    log.warn("send_selection: no terminal pane available")
+    return false
+  end
+  if not terminal.send_text(ref, false) then
+    log.warn("send_selection: could not type into the terminal")
+    return false
+  end
+  terminal.focus()
+  log.debug("selection prefill: " .. ref)
+  return true
 end
 
 ---Clear tracked context files.

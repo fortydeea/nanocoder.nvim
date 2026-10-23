@@ -137,8 +137,42 @@ local function capture_send()
   end
 end
 
-test("NanocoderSend: <cmd> mapping from visual mode sends the live selection", function()
-  local sent, restore = capture_send()
+---Stub terminal entry points and record what is typed into it.
+---@return table[] calls, function restore
+local function capture_terminal()
+  local calls = {}
+  local orig = {
+    is_open = terminal.is_open,
+    open = terminal.open,
+    send_text = terminal.send_text,
+    focus = terminal.focus,
+  }
+  terminal.is_open = function()
+    return true
+  end
+  terminal.open = function()
+    return true
+  end
+  terminal.send_text = function(text, submit)
+    calls[#calls + 1] = { text = text, submit = submit }
+    return true
+  end
+  terminal.focus = function()
+    return true
+  end
+  return calls, function()
+    terminal.is_open, terminal.open, terminal.send_text, terminal.focus =
+      orig.is_open, orig.open, orig.send_text, orig.focus
+  end
+end
+
+---Expected terminal prefill for a buffer path and 0-based inclusive range.
+local function ref_for(path, start_line, end_line)
+  return string.format("@%s#L%d-L%d ", vim.fn.fnamemodify(path, ":."), start_line + 1, end_line + 1)
+end
+
+test("NanocoderSend: <cmd> mapping from visual mode prefills the live selection", function()
+  local calls, restore = capture_terminal()
   local buf = vim.api.nvim_create_buf(true, false)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two", "three", "four" })
   vim.api.nvim_buf_set_name(buf, "/tmp/cmd-vis.lua")
@@ -150,20 +184,14 @@ test("NanocoderSend: <cmd> mapping from visual mode sends the live selection", f
   local keys = vim.api.nvim_replace_termcodes("jVj<leader>as", true, false, true)
   vim.api.nvim_feedkeys(keys, "x", false)
 
-  eq(1, #sent)
-  eq("send_prompt", sent[1].type)
-  ok(sent[1].prompt:find("two", 1, true), "prompt should contain the selected line")
-  ok(sent[1].prompt:find("three", 1, true), "prompt should contain the selected line")
-  ok(not sent[1].prompt:find("one\n", 1, true), "prompt should not contain unselected line 1")
-  eq(1, sent[1].context.startLine)
-  eq(2, sent[1].context.endLine)
+  eq({ { text = ref_for("/tmp/cmd-vis.lua", 1, 2), submit = false } }, calls)
   vim.keymap.del("v", "<leader>as", { buffer = buf })
   vim.api.nvim_buf_delete(buf, { force = true })
   restore()
 end)
 
-test("NanocoderSend: an explicit command range sends those lines", function()
-  local sent, restore = capture_send()
+test("NanocoderSend: an explicit command range prefills those lines", function()
+  local calls, restore = capture_terminal()
   local buf = vim.api.nvim_create_buf(true, false)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two", "three", "four" })
   vim.api.nvim_buf_set_name(buf, "/tmp/cmd-range.lua")
@@ -171,12 +199,7 @@ test("NanocoderSend: an explicit command range sends those lines", function()
 
   vim.cmd("2,3NanocoderSend")
 
-  eq(1, #sent)
-  eq("send_prompt", sent[1].type)
-  ok(sent[1].prompt:find("two", 1, true), "prompt should contain line 2")
-  ok(sent[1].prompt:find("three", 1, true), "prompt should contain line 3")
-  eq(1, sent[1].context.startLine)
-  eq(2, sent[1].context.endLine)
+  eq({ { text = ref_for("/tmp/cmd-range.lua", 1, 2), submit = false } }, calls)
   vim.api.nvim_buf_delete(buf, { force = true })
   restore()
 end)

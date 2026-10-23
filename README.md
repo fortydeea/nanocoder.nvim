@@ -86,8 +86,10 @@ the plugin auto-starts the companion connection.
 ## Usage
 
 1. **Launch**: `:Nanocoder` opens a terminal running `nanocoder --vscode`.
-2. **Send context**: select text and press `<leader>as`, or `:NanocoderAdd`
-   for a file/range, `:NanocoderTreeAdd` from a file tree.
+2. **Send context**: select text and press `<leader>as` — the terminal is
+   prefilled with `@file#L{start}-L{end}` and you type the instruction after
+   it. Or `:NanocoderAdd` for a file/range, `:NanocoderTreeAdd` from a file
+   tree.
 3. **Review diffs**: proposed changes open as native diffs — `:w` accepts,
    `:q` rejects.
 
@@ -98,7 +100,7 @@ the plugin auto-starts the companion connection.
 - `:NanocoderStart` / `:NanocoderStop` — start/stop the terminal and connection
 - `:NanocoderOpen` / `:NanocoderClose` — open/close the terminal window
 - `:NanocoderStatus` — show connection state, model, provider
-- `:NanocoderSend` — send the visual selection (or a prompted message)
+- `:NanocoderSend` — prefill the terminal with the selection reference (`@file#L{start}-L{end}`, does not submit; you type the instruction after it), or prompt for a message when nothing is selected
 - `:NanocoderSendText {text}` — type text into the terminal (`!` inserts without submitting)
 - `:NanocoderAdd [start] [end]` — add the current file/range to context
 - `:NanocoderTreeAdd` — add the file under the cursor in a file tree
