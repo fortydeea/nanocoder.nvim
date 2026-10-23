@@ -126,3 +126,68 @@ test("send_selection sends the marked range", function()
   ok(sent[1].prompt:find("sel one", 1, true), "prompt should contain the selection")
   vim.api.nvim_buf_delete(buf, { force = true })
 end)
+
+test("send_selection uses an explicit range when given", function()
+  capture()
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "aaa", "bbb", "ccc" })
+  vim.api.nvim_buf_set_name(buf, "/tmp/ctx-exprange.lua")
+  vim.api.nvim_set_current_buf(buf)
+
+  eq(true, context.send_selection(1, 2))
+  eq(1, #sent)
+  ok(sent[1].prompt:find("bbb", 1, true), "prompt should contain line 2")
+  ok(sent[1].prompt:find("ccc", 1, true), "prompt should contain line 3")
+  ok(not sent[1].prompt:find("aaa", 1, true), "prompt should not contain line 1")
+  eq(1, sent[1].context.startLine)
+  eq(2, sent[1].context.endLine)
+  vim.api.nvim_buf_delete(buf, { force = true })
+end)
+
+test("send_selection reads the live visual selection (marks still unset)", function()
+  capture()
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "l1", "l2", "l3", "l4" })
+  vim.api.nvim_buf_set_name(buf, "/tmp/ctx-live.lua")
+  vim.api.nvim_set_current_buf(buf)
+
+  -- Map a Lua callback in visual mode, like <cmd>NanocoderSend<cr> would run.
+  -- Marks '</'> are NOT set yet at that point; the live range is the truth.
+  local results = {}
+  vim.keymap.set("v", "gS", function()
+    results[#results + 1] = context.send_selection()
+  end, { buffer = buf })
+  local keys = vim.api.nvim_replace_termcodes("jVjgS", true, false, true)
+  vim.api.nvim_feedkeys(keys, "x", false)
+
+  eq({ true }, results)
+  -- Ignore active_editor pushes from the context autocmds.
+  local prompts = {}
+  for _, msg in ipairs(sent) do
+    if msg.type == "send_prompt" then
+      prompts[#prompts + 1] = msg
+    end
+  end
+  eq(1, #prompts)
+  ok(prompts[1].prompt:find("l2", 1, true), "prompt should contain selection start")
+  ok(prompts[1].prompt:find("l3", 1, true), "prompt should contain selection end")
+  ok(not prompts[1].prompt:find("l1", 1, true), "prompt should not contain unselected line")
+  eq(1, prompts[1].context.startLine)
+  eq(2, prompts[1].context.endLine)
+  vim.keymap.del("v", "gS", { buffer = buf })
+  vim.api.nvim_buf_delete(buf, { force = true })
+end)
+
+test("send_selection warns and returns false with no selection", function()
+  capture()
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "only" })
+  vim.api.nvim_buf_set_name(buf, "/tmp/ctx-nosel2.lua")
+  vim.api.nvim_set_current_buf(buf)
+  vim.fn.setpos("'<", { 0, 0, 0, 0 })
+  vim.fn.setpos("'>", { 0, 0, 0, 0 })
+
+  eq(false, context.send_selection())
+  eq(0, #sent)
+  vim.api.nvim_buf_delete(buf, { force = true })
+end)

@@ -1,8 +1,10 @@
--- User command behavior: :NanocoderSelectModel relaunch rules.
+-- User command behavior: :NanocoderSelectModel relaunch rules, :NanocoderSend
+-- routing (visual range vs. prompted message).
 -- Empty or cancelled prompts must never restart the terminal or the socket.
 local config = require("nanocoder.config")
 local nanocoder = require("nanocoder")
 local terminal = require("nanocoder.terminal")
+local client = require("nanocoder.client")
 
 -- Register :Nanocoder* at load time so the tests below can :cmd them.
 -- auto_connect off: no deferred connect churn in a headless test run.
@@ -114,4 +116,86 @@ test("SelectModel: a real change relaunches once with the selected argv", functi
   eq({ "stop", "start" }, record)
   eq({ "nanocoder", "--vscode", "--provider", "openai", "--model", "gpt-5" }, terminal.get_cli_argv())
   terminal.set_cli_argv({ "nanocoder", "--vscode" })
+end)
+
+-- :NanocoderSend routing -------------------------------------------------
+
+---Capture send_prompt messages sent to the companion.
+---(active_editor pushes from the context autocmds are ignored.)
+---@return table[] messages, function restore
+local function capture_send()
+  local sent = {}
+  local orig = client.send
+  client.send = function(msg)
+    if msg.type == "send_prompt" then
+      sent[#sent + 1] = msg
+    end
+    return true
+  end
+  return sent, function()
+    client.send = orig
+  end
+end
+
+test("NanocoderSend: <cmd> mapping from visual mode sends the live selection", function()
+  local sent, restore = capture_send()
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two", "three", "four" })
+  vim.api.nvim_buf_set_name(buf, "/tmp/cmd-vis.lua")
+  vim.api.nvim_set_current_buf(buf)
+
+  -- The README's recommended mapping shape: <cmd> passes no range and runs
+  -- while still in visual mode, with '</'> marks not yet set.
+  vim.keymap.set("v", "<leader>as", "<cmd>NanocoderSend<cr>", { buffer = buf })
+  local keys = vim.api.nvim_replace_termcodes("jVj<leader>as", true, false, true)
+  vim.api.nvim_feedkeys(keys, "x", false)
+
+  eq(1, #sent)
+  eq("send_prompt", sent[1].type)
+  ok(sent[1].prompt:find("two", 1, true), "prompt should contain the selected line")
+  ok(sent[1].prompt:find("three", 1, true), "prompt should contain the selected line")
+  ok(not sent[1].prompt:find("one\n", 1, true), "prompt should not contain unselected line 1")
+  eq(1, sent[1].context.startLine)
+  eq(2, sent[1].context.endLine)
+  vim.keymap.del("v", "<leader>as", { buffer = buf })
+  vim.api.nvim_buf_delete(buf, { force = true })
+  restore()
+end)
+
+test("NanocoderSend: an explicit command range sends those lines", function()
+  local sent, restore = capture_send()
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two", "three", "four" })
+  vim.api.nvim_buf_set_name(buf, "/tmp/cmd-range.lua")
+  vim.api.nvim_set_current_buf(buf)
+
+  vim.cmd("2,3NanocoderSend")
+
+  eq(1, #sent)
+  eq("send_prompt", sent[1].type)
+  ok(sent[1].prompt:find("two", 1, true), "prompt should contain line 2")
+  ok(sent[1].prompt:find("three", 1, true), "prompt should contain line 3")
+  eq(1, sent[1].context.startLine)
+  eq(2, sent[1].context.endLine)
+  vim.api.nvim_buf_delete(buf, { force = true })
+  restore()
+end)
+
+test("NanocoderSend: without a range or selection it prompts for a message", function()
+  local sent, restore = capture_send()
+  local orig_input = vim.fn.input
+  local asked
+  vim.fn.input = function(prompt)
+    asked = prompt
+    return "fix the bug"
+  end
+
+  vim.cmd("NanocoderSend")
+
+  eq("Nanocoder prompt: ", asked)
+  eq(1, #sent)
+  eq("send_prompt", sent[1].type)
+  eq("fix the bug", sent[1].prompt)
+  vim.fn.input = orig_input
+  restore()
 end)
