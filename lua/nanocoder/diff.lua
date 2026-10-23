@@ -127,6 +127,36 @@ function M.open(msg)
     end
   end
 
+  -- The CLI proposes changes while the user is typing in the terminal, so the
+  -- current window is often the terminal's. Never build the diff there: the
+  -- :edit below would replace the terminal buffer and make the terminal
+  -- disappear. Move to another window first, or split one off.
+  local term_buf = terminal.get_bufnr()
+  if term_buf and vim.api.nvim_get_current_buf() == term_buf then
+    local function usable(win)
+      if not (win and vim.api.nvim_win_is_valid(win)) then
+        return false
+      end
+      local buf = vim.api.nvim_win_get_buf(win)
+      return buf ~= term_buf and not buf_state[buf]
+    end
+    local target = vim.fn.win_getid(vim.fn.winnr("#") or 0)
+    if not usable(target) then
+      target = nil
+      for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        if usable(win) then
+          target = win
+          break
+        end
+      end
+    end
+    if target then
+      vim.api.nvim_set_current_win(target)
+    else
+      vim.cmd("split") -- duplicates the terminal buffer; :edit swaps in the file
+    end
+  end
+
   -- A new proposal while one is open replaces the previous one (the CLI
   -- only tracks one in-flight change per session in practice).
   for other_id, other in pairs(M._pending) do

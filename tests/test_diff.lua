@@ -262,3 +262,43 @@ test("many sequential diffs do not accumulate diff-mode buffers (E96 guard)", fu
   eq(0, diff.pending_count())
   eq(10, count_type("apply_change"))
 end)
+
+test("file_change while the terminal is focused never replaces the terminal buffer", function()
+  capture()
+  config.setup({})
+  diff.setup()
+  local terminal = require("nanocoder.terminal")
+
+  -- Fake the nanocoder terminal: a scratch buffer in its own window, which is
+  -- the current (focused) window — the state when the CLI proposes a change.
+  local term_buf = vim.api.nvim_create_buf(false, true)
+  local term_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(term_win, term_buf)
+  local orig_get_bufnr = terminal.get_bufnr
+  terminal.get_bufnr = function()
+    return term_buf
+  end
+
+  local tmp = vim.fn.tempname() .. ".lua"
+  local f = io.open(tmp, "w")
+  f:write("a\n")
+  f:close()
+
+  eq(true, diff.open(file_change_msg("t1", tmp, "a\n", "b\n")))
+
+  -- The terminal window still shows the terminal buffer; the diff opened
+  -- elsewhere. Without the fix, :edit ran in the terminal window and the
+  -- terminal buffer vanished from every window.
+  eq(term_buf, vim.api.nvim_win_get_buf(term_win))
+  eq(true, vim.api.nvim_buf_is_valid(term_buf))
+  local entry = diff._pending.t1
+  ok(entry, "t1 should be pending")
+  ok(entry.left_win ~= term_win, "the diff must not use the terminal window")
+  -- entry.bufnr is the proposed scratch buffer ("<path> (proposed)" by design,
+  -- else its name would collide with the file buffer); the file is left_bufnr.
+  eq(tmp, vim.fn.fnamemodify(vim.api.nvim_buf_get_name(entry.left_bufnr), ":p"))
+
+  terminal.get_bufnr = orig_get_bufnr
+  diff.close_all("test cleanup")
+  pcall(vim.api.nvim_buf_delete, term_buf, { force = true })
+end)
