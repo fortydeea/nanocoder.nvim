@@ -1,8 +1,10 @@
--- Context assembly, file adds, tree-path parsing, and prompt sending.
+-- Context assembly, file adds, tree-path parsing, prompt sending, and
+-- selection prefill.
 local config = require("nanocoder.config")
 local context = require("nanocoder.context")
 local protocol = require("nanocoder.protocol")
 local client = require("nanocoder.client")
+local terminal = require("nanocoder.terminal")
 
 -- Capture what would be sent to the companion.
 local sent = {}
@@ -12,6 +14,40 @@ local function capture()
     sent[#sent + 1] = msg
     return true
   end
+end
+
+---Stub terminal entry points and record what is typed into it.
+---@return table[] calls, function restore
+local function capture_terminal()
+  local calls = {}
+  local orig = {
+    is_open = terminal.is_open,
+    open = terminal.open,
+    send_text = terminal.send_text,
+    focus = terminal.focus,
+  }
+  terminal.is_open = function()
+    return true
+  end
+  terminal.open = function()
+    return true
+  end
+  terminal.send_text = function(text, submit)
+    calls[#calls + 1] = { text = text, submit = submit }
+    return true
+  end
+  terminal.focus = function()
+    return true
+  end
+  return calls, function()
+    terminal.is_open, terminal.open, terminal.send_text, terminal.focus =
+      orig.is_open, orig.open, orig.send_text, orig.focus
+  end
+end
+
+---Expected terminal prefill for a buffer path and 0-based inclusive range.
+local function ref_for(path, start_line, end_line)
+  return string.format("@%s#L%d-L%d ", vim.fn.fnamemodify(path, ":."), start_line + 1, end_line + 1)
 end
 
 test("prompt_context includes file, cursor, and selection", function()
@@ -112,8 +148,8 @@ test("path_from_tree_line: no path yields nil", function()
   eq(nil, context.path_from_tree_line(""))
 end)
 
-test("send_selection sends the marked range", function()
-  capture()
+test("send_selection prefills the terminal with the marked range", function()
+  local calls, restore = capture_terminal()
   local buf = vim.api.nvim_create_buf(true, false)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "sel one", "sel two" })
   vim.api.nvim_buf_set_name(buf, "/tmp/ctx-vis.lua")
@@ -122,30 +158,26 @@ test("send_selection sends the marked range", function()
   vim.fn.setpos("'>", { buf, 2, 1, 0 })
 
   eq(true, context.send_selection())
-  eq(1, #sent)
-  ok(sent[1].prompt:find("sel one", 1, true), "prompt should contain the selection")
+  eq({ { text = ref_for("/tmp/ctx-vis.lua", 0, 1), submit = false } }, calls)
   vim.api.nvim_buf_delete(buf, { force = true })
+  restore()
 end)
 
 test("send_selection uses an explicit range when given", function()
-  capture()
+  local calls, restore = capture_terminal()
   local buf = vim.api.nvim_create_buf(true, false)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "aaa", "bbb", "ccc" })
   vim.api.nvim_buf_set_name(buf, "/tmp/ctx-exprange.lua")
   vim.api.nvim_set_current_buf(buf)
 
   eq(true, context.send_selection(1, 2))
-  eq(1, #sent)
-  ok(sent[1].prompt:find("bbb", 1, true), "prompt should contain line 2")
-  ok(sent[1].prompt:find("ccc", 1, true), "prompt should contain line 3")
-  ok(not sent[1].prompt:find("aaa", 1, true), "prompt should not contain line 1")
-  eq(1, sent[1].context.startLine)
-  eq(2, sent[1].context.endLine)
+  eq({ { text = ref_for("/tmp/ctx-exprange.lua", 1, 2), submit = false } }, calls)
   vim.api.nvim_buf_delete(buf, { force = true })
+  restore()
 end)
 
 test("send_selection reads the live visual selection (marks still unset)", function()
-  capture()
+  local calls, restore = capture_terminal()
   local buf = vim.api.nvim_create_buf(true, false)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "l1", "l2", "l3", "l4" })
   vim.api.nvim_buf_set_name(buf, "/tmp/ctx-live.lua")
@@ -161,25 +193,14 @@ test("send_selection reads the live visual selection (marks still unset)", funct
   vim.api.nvim_feedkeys(keys, "x", false)
 
   eq({ true }, results)
-  -- Ignore active_editor pushes from the context autocmds.
-  local prompts = {}
-  for _, msg in ipairs(sent) do
-    if msg.type == "send_prompt" then
-      prompts[#prompts + 1] = msg
-    end
-  end
-  eq(1, #prompts)
-  ok(prompts[1].prompt:find("l2", 1, true), "prompt should contain selection start")
-  ok(prompts[1].prompt:find("l3", 1, true), "prompt should contain selection end")
-  ok(not prompts[1].prompt:find("l1", 1, true), "prompt should not contain unselected line")
-  eq(1, prompts[1].context.startLine)
-  eq(2, prompts[1].context.endLine)
+  eq({ { text = ref_for("/tmp/ctx-live.lua", 1, 2), submit = false } }, calls)
   vim.keymap.del("v", "gS", { buffer = buf })
   vim.api.nvim_buf_delete(buf, { force = true })
+  restore()
 end)
 
 test("send_selection warns and returns false with no selection", function()
-  capture()
+  local calls, restore = capture_terminal()
   local buf = vim.api.nvim_create_buf(true, false)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "only" })
   vim.api.nvim_buf_set_name(buf, "/tmp/ctx-nosel2.lua")
@@ -188,6 +209,25 @@ test("send_selection warns and returns false with no selection", function()
   vim.fn.setpos("'>", { 0, 0, 0, 0 })
 
   eq(false, context.send_selection())
-  eq(0, #sent)
+  eq({}, calls)
   vim.api.nvim_buf_delete(buf, { force = true })
+  restore()
+end)
+
+test("send_selection does not submit or send a prompt", function()
+  capture()
+  local calls, restore = capture_terminal()
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "x", "y" })
+  vim.api.nvim_buf_set_name(buf, "/tmp/ctx-nosubmit.lua")
+  vim.api.nvim_set_current_buf(buf)
+  vim.fn.setpos("'<", { buf, 1, 1, 0 })
+  vim.fn.setpos("'>", { buf, 2, 1, 0 })
+
+  eq(true, context.send_selection())
+  eq(1, #calls)
+  eq(false, calls[1].submit)
+  eq({}, sent) -- nothing goes over the WebSocket
+  vim.api.nvim_buf_delete(buf, { force = true })
+  restore()
 end)

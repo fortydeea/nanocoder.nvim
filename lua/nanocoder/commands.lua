@@ -84,7 +84,7 @@ function M.setup()
         context.send_prompt(prompt)
       end
     end
-  end, { desc = "Send the visual selection (or a prompted message) to nanocoder", range = true })
+  end, { desc = "Prefill the terminal with the selection reference (or prompt for a message)", range = true })
 
   create("NanocoderSendText", function(args)
     local text = args.args
