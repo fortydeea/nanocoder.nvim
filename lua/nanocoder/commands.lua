@@ -71,7 +71,12 @@ function M.setup()
 
   create("NanocoderSend", function(args)
     local context = require("nanocoder.context")
+    -- <cmd> mappings run while still in visual mode but pass no range, so
+    -- detect visual mode as well; an explicit :'<,'> range wins.
+    local in_visual = vim.api.nvim_get_mode().mode:match("[vV\22]") ~= nil
     if args.range > 0 then
+      context.send_selection(args.line1 - 1, args.line2 - 1)
+    elseif in_visual then
       context.send_selection()
     else
       local prompt = vim.fn.input("Nanocoder prompt: ")

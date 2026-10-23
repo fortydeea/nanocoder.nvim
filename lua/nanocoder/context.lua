@@ -16,6 +16,23 @@ local DEBOUNCE_MS = 300
 -- Files pushed into the CLI's context via :NanocoderAdd / :NanocoderTreeAdd.
 local context_files = {}
 
+---Line range of the live visual selection (0-based, inclusive).
+---The '<'/'> marks are only set after leaving visual mode, so while still in
+---visual mode the live range (getpos("v") .. getpos(".")) is the truth.
+---@return number|nil start_line, number|nil end_line
+local function live_visual_range()
+  local mode = vim.api.nvim_get_mode().mode
+  if not mode:match("[vV\22]") then
+    return nil
+  end
+  local start_line = vim.fn.getpos("v")[2] - 1
+  local end_line = vim.fn.getpos(".")[2] - 1
+  if start_line > end_line then
+    start_line, end_line = end_line, start_line
+  end
+  return start_line, end_line
+end
+
 ---Build the active_editor payload from the current window state.
 ---@return table
 local function current_editor_state()
@@ -31,18 +48,12 @@ local function current_editor_state()
   }
 
   -- Visual selection, when present: capture the selected text and range.
-  local mode = vim.api.nvim_get_mode().mode
-  if mode:match("[vV\22]") then
-    local start_pos = vim.fn.getpos("'<")
-    local end_pos = vim.fn.getpos("'>")
-    local start_line = start_pos[2] - 1 -- protocol is 0-based
-    local end_line = end_pos[2] - 1
-    if start_line >= 0 and end_line >= start_line then
-      local lines = vim.api.nvim_buf_get_lines(bufnr, start_line, end_line + 1, false)
-      state.selection = table.concat(lines, "\n")
-      state.startLine = start_line
-      state.endLine = end_line
-    end
+  local start_line, end_line = live_visual_range()
+  if start_line and start_line >= 0 and end_line >= start_line then
+    local lines = vim.api.nvim_buf_get_lines(bufnr, start_line, end_line + 1, false)
+    state.selection = table.concat(lines, "\n")
+    state.startLine = start_line
+    state.endLine = end_line
   end
 
   return state
@@ -105,12 +116,8 @@ function M.prompt_context(opts)
   local end_line = opts.end_line
 
   if start_line == nil then
-    -- Fall back to the visual marks when a selection exists.
-    local mode = vim.api.nvim_get_mode().mode
-    if mode:match("[vV\22]") then
-      start_line = vim.fn.getpos("'<")[2] - 1
-      end_line = vim.fn.getpos("'>")[2] - 1
-    end
+    -- Fall back to the live visual selection when one exists.
+    start_line, end_line = live_visual_range()
   end
 
   if start_line and end_line and start_line >= 0 and end_line >= start_line then
@@ -202,19 +209,35 @@ function M.path_from_tree_line(line)
 end
 
 ---Send a visual selection as a prompt to the CLI.
+---Prefers an explicit range (from :'<,'>NanocoderSend); otherwise uses the
+---live visual selection, then the '<'/'> marks from a completed selection.
+---@param start_line number|nil 0-based, inclusive
+---@param end_line number|nil 0-based, inclusive
 ---@return boolean sent
-function M.send_selection()
-  local bufnr = vim.api.nvim_get_current_buf()
-  local start_line = vim.fn.getpos("'<")[2] - 1
-  local end_line = vim.fn.getpos("'>")[2] - 1
-  if start_line < 0 or end_line < start_line then
+function M.send_selection(start_line, end_line)
+  if start_line == nil then
+    start_line, end_line = live_visual_range()
+  end
+  if start_line == nil then
+    -- Not in visual mode: marks reflect the last completed selection.
+    local bufnr = vim.api.nvim_get_current_buf()
+    local mark_start, mark_end = vim.fn.getpos("'<"), vim.fn.getpos("'>")
+    -- getpos returns bufnr 0 for marks in the current buffer.
+    if (mark_start[1] == 0 or mark_start[1] == bufnr)
+      and (mark_end[1] == 0 or mark_end[1] == bufnr)
+      and mark_start[2] > 0 and mark_end[2] >= mark_start[2] then
+      start_line, end_line = mark_start[2] - 1, mark_end[2] - 1
+    end
+  end
+  if start_line == nil or start_line < 0 or end_line < start_line then
     log.warn("send_selection: no visual selection")
     return false
   end
+  local bufnr = vim.api.nvim_get_current_buf()
   local lines = vim.api.nvim_buf_get_lines(bufnr, start_line, end_line + 1, false)
   local selection = table.concat(lines, "\n")
-  local ctx = M.prompt_context({ start_line = start_line, end_line = end_line })
   local prompt = "Please consider this selection:\n\n```\n" .. selection .. "\n```"
+  -- Range is passed so the context carries the selection's line metadata.
   return M.send_prompt(prompt, { start_line = start_line, end_line = end_line })
 end
 
