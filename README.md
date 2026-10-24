@@ -91,7 +91,8 @@ the plugin auto-starts the companion connection.
    it. Or `:NanocoderAdd` for a file/range, `:NanocoderTreeAdd` from a file
    tree.
 3. **Review diffs**: proposed changes open as native diffs — `:w` accepts,
-   `:q` rejects.
+   `:q` rejects. Your decision is mirrored onto the CLI's own "Tool Approval"
+   prompt, so one decision is enough: accept runs the tool, reject cancels it.
 
 ## Commands
 
@@ -119,6 +120,7 @@ require("nanocoder").setup({
   port = nil, token = nil,     -- manual fallback (SSH/remote setups)
   diff_opts = {
     layout = "vertical",       -- "vertical"|"horizontal"|"unified"
+    answer_tool_prompt = true, -- mirror accept/reject onto the CLI's tool prompt
   },
   terminal = {
     provider = "native",       -- "native"|"external"|"none"|custom-table
@@ -138,6 +140,28 @@ require("nanocoder").setup({
 ```
 
 See `lua/nanocoder/config.lua` for the complete schema.
+
+## Tool approval
+
+The CLI has its own "Tool Approval" prompt for every tool call, including the
+one behind a proposed diff — nothing is written to disk until it is answered.
+With `diff_opts.answer_tool_prompt = true` (default) the plugin answers it in
+the direction of your diff decision: accept sends Enter (runs the tool),
+reject sends Escape (cancels the tool call entirely, so a rejected diff is
+never applied). Closing a diff without deciding (`:NanocoderCloseAllDiffs`,
+a `close_diff` from the CLI) answers nothing.
+
+Details of the watch: it only sends a keystroke when that prompt is on screen
+for the accepted tool and the terminal has been quiet for a moment, so a
+different tool's prompt is never touched and Escape can never cancel an
+unrelated generation. For accept it additionally needs "Yes" to be the
+selected entry — if you move the selection, your choice stands and it waits
+(it never sends Enter on "No"; reject is indifferent to the selection, since
+Escape cancels either way). It gives up after 10 seconds and sends nothing.
+
+The auto-answer needs a `native` terminal; with the `external` or `none`
+provider there is no channel to type into, so answer the prompt in that
+terminal yourself.
 
 ## Diff lifecycle events
 

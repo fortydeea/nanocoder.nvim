@@ -3,6 +3,7 @@
 -- apply_change), :q rejects (sends reject_change). `close_diff` closes the
 -- matching view. The CLI is authoritative for applying the change — the diff
 -- view is a review surface, not the source of truth.
+local approve = require("nanocoder.approve")
 local client = require("nanocoder.client")
 local config = require("nanocoder.config")
 local log = require("nanocoder.log")
@@ -80,6 +81,21 @@ local function resolve(id, accepted, reason)
 
   local msg = accepted and protocol.apply_change(id) or protocol.reject_change(id)
   client.send(msg)
+
+  -- The CLI keeps its own "Tool Approval" prompt open for the tool call behind
+  -- this change, and nothing is written to disk until that prompt is answered.
+  -- Mirror the diff's decision onto it: accept approves the tool, reject
+  -- cancels it. Otherwise the same question comes back in the terminal, and a
+  -- rejected diff would still be applied.
+  local diff_opts = config.get().diff_opts or {}
+  if diff_opts.answer_tool_prompt ~= false then
+    approve.schedule(terminal.get_bufnr(), {
+      action = accepted and "approve" or "reject",
+      tool_name = entry.tool_name,
+    })
+  else
+    approve.cancel()
+  end
 
   cleanup_diff(entry)
   if entry.diff_window and vim.api.nvim_win_is_valid(entry.diff_window) then
@@ -205,6 +221,7 @@ function M.open(msg)
     file_path = old_path,
     new_file_path = new_path,
     is_new_file = is_new,
+    tool_name = msg.toolName,
     tab_name = vim.fn.fnamemodify(new_path, ":t"),
     diff_window = diff_win,
     left_win = left_win,
@@ -272,6 +289,9 @@ function M.close(id, reason)
   end
   M._pending[id] = nil
   buf_state[entry.bufnr] = nil
+  -- No accept/reject decision: never answer the tool prompt for a view that
+  -- was just closed (it would land on a later, unrelated prompt).
+  approve.cancel()
   cleanup_diff(entry)
   if entry.diff_window and vim.api.nvim_win_is_valid(entry.diff_window) then
     vim.api.nvim_win_close(entry.diff_window, true)

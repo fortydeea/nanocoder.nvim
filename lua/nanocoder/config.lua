@@ -13,6 +13,7 @@ M.defaults = {
   token = nil,
   diff_opts = {
     layout = "vertical", -- "vertical" | "horizontal" | "unified"
+    answer_tool_prompt = true, -- mirror accept/reject onto the CLI's tool prompt
     open_in_new_tab = false,
     keep_terminal_focus = false,
     hide_terminal_in_new_tab = false,

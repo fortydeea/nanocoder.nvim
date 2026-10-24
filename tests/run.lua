@@ -60,6 +60,7 @@ local files = {
   "tests/test_context.lua",
   "tests/test_handlers.lua",
   "tests/test_diff.lua",
+  "tests/test_approve.lua",
   "tests/test_health.lua",
   "tests/test_log.lua",
 }
