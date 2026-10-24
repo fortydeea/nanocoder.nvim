@@ -263,6 +263,63 @@ test("many sequential diffs do not accumulate diff-mode buffers (E96 guard)", fu
   eq(10, count_type("apply_change"))
 end)
 
+test("accept/deny does not leave buffers behind (buffer growth guard)", function()
+  capture()
+  config.setup({})
+  diff.setup()
+  local before = #vim.api.nvim_list_bufs()
+  for i = 1, 5 do
+    local tmp = vim.fn.tempname() .. ".lua"
+    vim.fn.writefile({ "a" }, tmp)
+    diff.open(file_change_msg("g" .. i, tmp, "a\n", "b\n"))
+    if i % 2 == 0 then
+      diff.accept("g" .. i)
+    else
+      diff.deny("g" .. i)
+    end
+  end
+  -- Both sides (the :edit-ed file buffer and the "(proposed)" scratch) must
+  -- be wiped; each cycle used to leak one file buffer.
+  eq(before, #vim.api.nvim_list_bufs())
+end)
+
+test("a buffer the user already had open survives diff cleanup", function()
+  capture()
+  config.setup({})
+  diff.setup()
+  local tmp = vim.fn.tempname() .. ".lua"
+  vim.fn.writefile({ "a" }, tmp)
+  vim.cmd("edit " .. vim.fn.fnameescape(tmp))
+  local user_buf = vim.api.nvim_get_current_buf()
+
+  diff.open(file_change_msg("h1", tmp, "a\n", "b\n"))
+  eq(true, diff.deny("h1"))
+  eq(true, vim.api.nvim_buf_is_valid(user_buf), "the user's buffer must survive")
+end)
+
+test("a diff round-trip must not resize the terminal window", function()
+  capture()
+  config.setup({})
+  diff.setup()
+  local terminal = require("nanocoder.terminal")
+  terminal.setup(config.get())
+  terminal.set_cli_argv({ "sh", "-c", "while true; do sleep 1; done" })
+
+  vim.cmd("only")
+  eq(true, terminal.open(false))
+  local term_win = vim.api.nvim_get_current_win()
+  local width = vim.api.nvim_win_get_width(term_win)
+
+  local tmp = vim.fn.tempname() .. ".lua"
+  vim.fn.writefile({ "a" }, tmp)
+  eq(true, diff.open(file_change_msg("r1", tmp, "a\n", "b\n")))
+  eq(width, vim.api.nvim_win_get_width(term_win), "opening a diff must not resize the terminal")
+  eq(true, diff.deny("r1"))
+  eq(width, vim.api.nvim_win_get_width(term_win), "denying a diff must not resize the terminal")
+
+  terminal.stop_job()
+end)
+
 test("file_change while the terminal is focused never replaces the terminal buffer", function()
   capture()
   config.setup({})

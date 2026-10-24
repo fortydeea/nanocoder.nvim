@@ -63,19 +63,28 @@ function native.open(cfg, focus)
   end
 
   -- Reuse the existing window when its job died, otherwise open a split.
+  local direction = term.split_direction or "botright"
+  local vertical = direction:find("vert", 1, true) ~= nil
   local win, created = state.winid, false
   if not (win and vim.api.nvim_win_is_valid(win)) then
-    local direction = term.split_direction or "botright"
     vim.cmd(direction .. " split")
     win = vim.api.nvim_get_current_win()
     created = true
-    if direction:find("vert", 1, true) then
+    if vertical then
       local width = math.floor(vim.o.columns * (term.split_width_percentage or 0.4))
       vim.api.nvim_win_set_width(win, math.max(width, 10))
     else
       local height = math.floor(vim.o.lines * (term.split_height_percentage or 0.4))
       vim.api.nvim_win_set_height(win, math.max(height, 3))
     end
+  end
+
+  -- Pin the split so splits opened/closed for diffs never redistribute its
+  -- size ('equalalways' would otherwise grow the terminal after each diff).
+  if vertical then
+    vim.wo[win].winfixwidth = true
+  else
+    vim.wo[win].winfixheight = true
   end
 
   -- Window closed but the job still runs: show that buffer again.

@@ -40,8 +40,43 @@ local function fire_user(name, data)
   vim.api.nvim_exec_autocmds("User", { pattern = name, data = data })
 end
 
----Clear diff mode and drop scratch buffers so repeated diffs do not accumulate
----in diff mode until Neovim refuses with E96 (max 8 diff buffers).
+---Whether a buffer named `path` already exists (so we must not delete it later).
+---@param path string
+---@return boolean
+local function buffer_for_path(path)
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_get_name(buf) == path then
+      return true
+    end
+  end
+  return false
+end
+
+---Put the diff's left window back on the buffer it showed before the diff
+---opened. Deleting our buffers must not close that window: Neovim closes a
+---window when its buffer is deleted and no fallback remains, and a closed
+---window re-splits the tab's width (the terminal then grows past its share).
+---@param entry table
+local function restore_left_window(entry)
+  local win = entry.left_win
+  if not (win and vim.api.nvim_win_is_valid(win)) then
+    return
+  end
+  -- The user may have swapped buffers mid-review; leave their choice alone.
+  if entry.left_bufnr and vim.api.nvim_win_get_buf(win) ~= entry.left_bufnr then
+    return
+  end
+  local prev = entry.prev_buf
+  if not (prev and vim.api.nvim_buf_is_valid(prev)) or prev == terminal.get_bufnr() then
+    -- No usable fallback (or it would duplicate the terminal buffer).
+    prev = vim.api.nvim_create_buf(true, false)
+  end
+  vim.api.nvim_win_set_buf(win, prev)
+end
+
+---Clear diff mode and drop the buffers the view opened so repeated diffs do
+---not accumulate in diff mode until Neovim refuses with E96 (max 8 diff
+---buffers), nor pile up one buffer per diff in the buffer list.
 ---@param entry table
 local function cleanup_diff(entry)
   for _, win in ipairs({ entry.left_win, entry.diff_window }) do
@@ -53,13 +88,27 @@ local function cleanup_diff(entry)
       end)
     end
   end
-  -- Both sides are scratch buffers we created (the proposed content is never
-  -- written to disk — the CLI applies the change), so both are safe to delete.
+  restore_left_window(entry)
+  -- Both sides exist only to review the proposal (the proposed content is
+  -- never written to disk — the CLI applies the change). The left buffer goes
+  -- too, but only when we created it and the user is not relying on it.
   if entry.bufnr and vim.api.nvim_buf_is_valid(entry.bufnr) then
     pcall(vim.api.nvim_buf_delete, entry.bufnr, { force = true })
   end
-  if entry.is_new_file and entry.left_bufnr and vim.api.nvim_buf_is_valid(entry.left_bufnr) then
-    pcall(vim.api.nvim_buf_delete, entry.left_bufnr, { force = true })
+  local left = entry.left_bufnr
+  if left and entry.left_owned and vim.api.nvim_buf_is_valid(left) then
+    local in_use = vim.bo[left].modified
+    if not in_use then
+      for _, win in ipairs(vim.fn.win_findbuf(left)) do
+        if win ~= entry.left_win and win ~= entry.diff_window then
+          in_use = true
+          break
+        end
+      end
+    end
+    if not in_use then
+      pcall(vim.api.nvim_buf_delete, left, { force = true })
+    end
   end
 end
 
@@ -133,6 +182,7 @@ function M.open(msg)
   -- disappear. Move to another window first, or split one off.
   local term_buf = terminal.get_bufnr()
   if term_buf and vim.api.nvim_get_current_buf() == term_buf then
+    ---@param win integer|nil
     local function usable(win)
       if not (win and vim.api.nvim_win_is_valid(win)) then
         return false
@@ -140,9 +190,11 @@ function M.open(msg)
       local buf = vim.api.nvim_win_get_buf(win)
       return buf ~= term_buf and not buf_state[buf]
     end
-    local target = vim.fn.win_getid(vim.fn.winnr("#") or 0)
-    if not usable(target) then
-      target = nil
+    local target ---@type integer|nil
+    local alt = vim.fn.win_getid(vim.fn.winnr("#") or 0)
+    if usable(alt) then
+      target = alt
+    else
       for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
         if usable(win) then
           target = win
@@ -171,11 +223,20 @@ function M.open(msg)
 
   -- Left side: the current file on disk (or an empty buffer for new files).
   local left_buf
+  local left_owned
   local left_win = vim.api.nvim_get_current_win()
+  -- Remember what this window showed before :edit hijacks it, so cleanup can
+  -- hand the window back instead of closing it (a closed window would let the
+  -- terminal absorb the freed width).
+  local prev_buf = vim.api.nvim_win_get_buf(left_win)
   if is_new then
     left_buf = vim.api.nvim_create_buf(false, true)
+    left_owned = true
     vim.api.nvim_buf_set_name(left_buf, old_path .. " (current)")
   else
+    -- :edit creates a new buffer when the file was not open before; that one
+    -- is ours to drop later. A buffer the user already had stays untouched.
+    left_owned = not buffer_for_path(old_path)
     vim.cmd("edit " .. vim.fn.fnameescape(old_path))
     left_buf = vim.api.nvim_get_current_buf()
     vim.cmd("diffthis")
@@ -211,6 +272,8 @@ function M.open(msg)
     target_window = vim.fn.win_getid(vim.fn.winnr("#") or 0),
     bufnr = right_buf,
     left_bufnr = left_buf,
+    left_owned = left_owned,
+    prev_buf = prev_buf,
   }
   M._pending[msg.id] = entry
   buf_state[right_buf] = { id = msg.id, accepted = nil }
@@ -274,7 +337,7 @@ function M.close(id, reason)
   buf_state[entry.bufnr] = nil
   cleanup_diff(entry)
   if entry.diff_window and vim.api.nvim_win_is_valid(entry.diff_window) then
-    vim.api.nvim_win_close(entry.diff_window, true)
+    pcall(vim.api.nvim_win_close, entry.diff_window, true)
   end
   fire_user("NanocoderDiffClosed", event_data(entry, reason))
   return true
