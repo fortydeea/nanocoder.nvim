@@ -123,7 +123,8 @@ require("nanocoder").setup({
   terminal = {
     provider = "native",       -- "native"|"external"|"none"|custom-table
     split_direction = "vert botright",  -- :split modifiers ("botright" for bottom)
-    split_width_percentage = 0.3,
+    split_width = 40,          -- vertical split width in columns
+    split_width_percentage = nil,  -- optional: width as fraction of editor (overrides split_width)
     split_height_percentage = 0.3,  -- used for horizontal splits
     focus_after_send = true,
     auto_insert = true,

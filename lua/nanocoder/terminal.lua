@@ -71,7 +71,9 @@ function native.open(cfg, focus)
     win = vim.api.nvim_get_current_win()
     created = true
     if vertical then
-      local width = math.floor(vim.o.columns * (term.split_width_percentage or 0.4))
+      -- split_width_percentage (when set) overrides the fixed column width.
+      local pct = term.split_width_percentage
+      local width = pct and math.floor(vim.o.columns * pct) or (term.split_width or 40)
       vim.api.nvim_win_set_width(win, math.max(width, 10))
     else
       local height = math.floor(vim.o.lines * (term.split_height_percentage or 0.4))
