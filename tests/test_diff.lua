@@ -359,3 +359,71 @@ test("file_change while the terminal is focused never replaces the terminal buff
   diff.close_all("test cleanup")
   pcall(vim.api.nvim_buf_delete, term_buf, { force = true })
 end)
+
+test("a sidebar window (neo-tree style) is never hijacked by the diff", function()
+  capture()
+  config.setup({})
+  diff.setup()
+
+  -- Sidebar: a nofile buffer in its own window, and it is focused — the state
+  -- when the CLI proposes a change while the user is in neo-tree.
+  local side_buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[side_buf].buftype = "nofile"
+  vim.api.nvim_buf_set_name(side_buf, "neo-tree filesystem [1]")
+  local side_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(side_win, side_buf)
+
+  local tmp = vim.fn.tempname() .. ".lua"
+  vim.fn.writefile({ "a" }, tmp)
+  eq(true, diff.open(file_change_msg("s1", tmp, "a\n", "b\n")))
+
+  eq(side_buf, vim.api.nvim_win_get_buf(side_win), "the sidebar window must keep its buffer")
+  local entry = diff._pending.s1
+  ok(entry, "s1 should be pending")
+  ok(entry.left_win ~= side_win, "the diff must not use the sidebar window")
+
+  diff.close_all("test cleanup")
+  pcall(vim.api.nvim_buf_delete, side_buf, { force = true })
+end)
+
+test("with the terminal focused, a sidebar is skipped in favor of a file window", function()
+  capture()
+  config.setup({})
+  diff.setup()
+  local terminal = require("nanocoder.terminal")
+
+  -- Layout: terminal (focused) + sidebar (the alternate window) + a plain
+  -- file window. The old usable() accepted the sidebar and hijacked it.
+  local side_buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[side_buf].buftype = "nofile"
+  vim.api.nvim_buf_set_name(side_buf, "neo-tree filesystem [1]")
+  local side_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(side_win, side_buf)
+
+  local file_tmp = vim.fn.tempname() .. ".lua"
+  vim.fn.writefile({ "f" }, file_tmp)
+  vim.cmd("split " .. vim.fn.fnameescape(file_tmp))
+  local file_win = vim.api.nvim_get_current_win()
+
+  local term_buf = vim.api.nvim_create_buf(false, true)
+  vim.cmd("split")
+  local term_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(term_win, term_buf)
+  local orig_get_bufnr = terminal.get_bufnr
+  terminal.get_bufnr = function()
+    return term_buf
+  end
+
+  local tmp = vim.fn.tempname() .. ".lua"
+  vim.fn.writefile({ "a" }, tmp)
+  eq(true, diff.open(file_change_msg("s2", tmp, "a\n", "b\n")))
+
+  eq(term_buf, vim.api.nvim_win_get_buf(term_win), "the terminal buffer must survive")
+  eq(side_buf, vim.api.nvim_win_get_buf(side_win), "the sidebar window must keep its buffer")
+  eq(file_win, diff._pending.s2.left_win, "the diff must use the file window")
+
+  terminal.get_bufnr = orig_get_bufnr
+  diff.close_all("test cleanup")
+  pcall(vim.api.nvim_buf_delete, term_buf, { force = true })
+  pcall(vim.api.nvim_buf_delete, side_buf, { force = true })
+end)
