@@ -176,20 +176,29 @@ function M.open(msg)
     end
   end
 
-  -- The CLI proposes changes while the user is typing in the terminal, so the
-  -- current window is often the terminal's. Never build the diff there: the
-  -- :edit below would replace the terminal buffer and make the terminal
-  -- disappear. Move to another window first, or split one off.
+  -- The diff's left side is built with :edit in the current window. That must
+  -- never be the terminal (the :edit would replace the terminal buffer) nor a
+  -- sidebar like neo-tree (its window would be hijacked). Only a normal file
+  -- window can host the diff: move to one, or split one off.
   local term_buf = terminal.get_bufnr()
-  if term_buf and vim.api.nvim_get_current_buf() == term_buf then
-    ---@param win integer|nil
-    local function usable(win)
-      if not (win and vim.api.nvim_win_is_valid(win)) then
-        return false
-      end
-      local buf = vim.api.nvim_win_get_buf(win)
-      return buf ~= term_buf and not buf_state[buf]
+  ---@param win integer|nil
+  local function usable(win)
+    if not (win and vim.api.nvim_win_is_valid(win)) then
+      return false
     end
+    if vim.api.nvim_win_get_config(win).relative ~= "" then
+      return false -- floating windows cannot host a split layout
+    end
+    local buf = vim.api.nvim_win_get_buf(win)
+    if buf == term_buf or buf_state[buf] then
+      return false
+    end
+    -- Sidebars and other special windows (neo-tree, help, quickfix, ...)
+    -- keep their buffer; they are not file windows.
+    return vim.bo[buf].buftype == ""
+  end
+
+  if not usable(vim.api.nvim_get_current_win()) then
     local target ---@type integer|nil
     local alt = vim.fn.win_getid(vim.fn.winnr("#") or 0)
     if usable(alt) then
@@ -205,7 +214,13 @@ function M.open(msg)
     if target then
       vim.api.nvim_set_current_win(target)
     else
-      vim.cmd("split") -- duplicates the terminal buffer; :edit swaps in the file
+      -- Split from the terminal: its buffer duplicates cleanly and :edit
+      -- swaps in the file. A sidebar split would inherit its window options.
+      local term_win = term_buf and vim.fn.win_findbuf(term_buf)[1] or nil
+      if term_win then
+        vim.api.nvim_set_current_win(term_win)
+      end
+      vim.cmd("split")
     end
   end
 
