@@ -15,6 +15,7 @@ local state = {
   job_id = nil,
   cmd = nil,
   args = nil,
+  session = nil, -- one-shot session flags for the next spawn
 }
 
 ---Launch arguments for the CLI. `nanocoder --vscode` starts the companion
@@ -107,7 +108,7 @@ function native.open(cfg, focus)
     state.job_id = nil
   end
 
-  local cmd = state.cmd or M.build_cli_argv(cfg)
+  local cmd = M.take_cli_argv(cfg)
   local cwd = config.effective_cwd(cfg)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_win_set_buf(win, buf)
@@ -226,7 +227,7 @@ local function external_argv(cfg, cli_argv)
 end
 
 function external.open(cfg)
-  local argv = external_argv(cfg, state.cmd or M.build_cli_argv(cfg))
+  local argv = external_argv(cfg, M.take_cli_argv(cfg))
   if not argv then
     log.error("external provider: no external_terminal_cmd configured")
     return false
@@ -331,6 +332,31 @@ end
 ---@return string[]|nil argv
 function M.get_cli_argv()
   return state.cmd
+end
+
+---Set one-shot session flags for the next launch (e.g. {"--continue"} or
+---{"--resume", "last"}), used by :NanocoderContinue and :NanocoderResume.
+---@param args string[]|nil
+function M.set_session_args(args)
+  state.session = args
+end
+
+---@return string[]|nil
+function M.get_session_args()
+  return state.session
+end
+
+---argv for the next spawn: the CLI argv plus any pending session flags.
+---Consumes the session flags so later plain launches start a fresh session.
+---@param cfg table|nil
+---@return string[] argv
+function M.take_cli_argv(cfg)
+  local argv = vim.deepcopy(state.cmd or M.build_cli_argv(cfg))
+  if state.session then
+    vim.list_extend(argv, state.session)
+    state.session = nil
+  end
+  return argv
 end
 
 ---Open the terminal (idempotent).
