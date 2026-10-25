@@ -158,6 +158,34 @@ function M.setup()
     end)
   end, { desc = "Choose provider/model and relaunch the nanocoder terminal" })
 
+  -- Session relaunch ---------------------------------------------------
+
+  ---Kill the running CLI (if any) and start it again, optionally resuming.
+  ---@param session_args string[]|nil one-shot CLI session flags
+  local function relaunch(session_args)
+    terminal.set_session_args(session_args)
+    log.info("relaunching: " .. table.concat(vim.list_extend(vim.deepcopy(terminal.get_cli_argv() or terminal.build_cli_argv()), session_args or {}), " "))
+    nanocoder.stop()
+    nanocoder.start()
+  end
+
+  create("NanocoderContinue", function()
+    relaunch({ "--continue" })
+  end, { desc = "Restart nanocoder and continue the most recent session" })
+
+  create("NanocoderResume", function(args)
+    local id = args.args
+    local session_args = { "--resume" }
+    if id ~= "" then
+      session_args[#session_args + 1] = id
+    end
+    relaunch(session_args)
+  end, { desc = "Restart nanocoder and resume a session (id optional, picker when omitted)", nargs = "?" })
+
+  create("NanocoderRestart", function()
+    relaunch(nil)
+  end, { desc = "Restart the nanocoder terminal with a fresh session" })
+
   log.debug("commands registered")
 
   -- Diff review -----------------------------------------------------

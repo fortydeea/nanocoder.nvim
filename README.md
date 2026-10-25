@@ -31,6 +31,7 @@ accept or reject.
     "Nanocoder", "NanocoderFocus", "NanocoderSelectModel", "NanocoderAdd",
     "NanocoderSend", "NanocoderSendText", "NanocoderTreeAdd", "NanocoderStatus",
     "NanocoderStart", "NanocoderStop", "NanocoderOpen", "NanocoderClose",
+    "NanocoderContinue", "NanocoderResume", "NanocoderRestart",
     "NanocoderDiffAccept", "NanocoderDiffDeny", "NanocoderCloseAllDiffs",
   },
   keys = {
@@ -105,6 +106,9 @@ the plugin auto-starts the companion connection.
 - `:NanocoderAdd [start] [end]` — add the current file/range to context
 - `:NanocoderTreeAdd` — add the file under the cursor in a file tree
 - `:NanocoderSelectModel` — choose provider/model, relaunch the terminal
+- `:NanocoderContinue` — restart and continue the most recent session (`nanocoder --continue`)
+- `:NanocoderResume [id]` — restart and resume a session; without `id` the CLI's session picker opens, with `id` (uuid, index, or `last`) that session is resumed directly
+- `:NanocoderRestart` — restart the terminal with a fresh session (keeps the selected provider/model)
 - `:NanocoderDiffAccept` / `:NanocoderDiffDeny` — accept/reject the diff under the cursor
 - `:NanocoderCloseAllDiffs` — close all pending diffs without accepting
 

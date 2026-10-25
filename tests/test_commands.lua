@@ -118,6 +118,58 @@ test("SelectModel: a real change relaunches once with the selected argv", functi
   terminal.set_cli_argv({ "nanocoder", "--vscode" })
 end)
 
+-- :NanocoderContinue / :NanocoderResume / :NanocoderRestart --------------
+
+test("Continue: relaunches with the one-shot --continue flag", function()
+  terminal.set_cli_argv({ "nanocoder", "--vscode" })
+  terminal.set_session_args(nil)
+  local record = {}
+  with_lifecycle(record, function()
+    vim.cmd("NanocoderContinue")
+  end)
+  eq({ "stop", "start" }, record)
+  eq({ "--continue" }, terminal.get_session_args())
+  terminal.set_session_args(nil)
+end)
+
+test("Resume: with no id passes bare --resume (CLI opens its picker)", function()
+  local record = {}
+  with_lifecycle(record, function()
+    vim.cmd("NanocoderResume")
+  end)
+  eq({ "stop", "start" }, record)
+  eq({ "--resume" }, terminal.get_session_args())
+  terminal.set_session_args(nil)
+end)
+
+test("Resume: with an id passes --resume <id>", function()
+  local record = {}
+  with_lifecycle(record, function()
+    vim.cmd("NanocoderResume abc-123")
+  end)
+  eq({ "stop", "start" }, record)
+  eq({ "--resume", "abc-123" }, terminal.get_session_args())
+  terminal.set_session_args(nil)
+end)
+
+test("Restart: relaunches without session flags", function()
+  terminal.set_session_args({ "--continue" }) -- stale flag must not leak
+  local record = {}
+  with_lifecycle(record, function()
+    vim.cmd("NanocoderRestart")
+  end)
+  eq({ "stop", "start" }, record)
+  eq(nil, terminal.get_session_args())
+end)
+
+test("take_cli_argv consumes the session flags exactly once", function()
+  terminal.set_cli_argv({ "nanocoder", "--vscode" })
+  terminal.set_session_args({ "--continue" })
+  eq({ "nanocoder", "--vscode", "--continue" }, terminal.take_cli_argv())
+  eq(nil, terminal.get_session_args())
+  eq({ "nanocoder", "--vscode" }, terminal.take_cli_argv())
+end)
+
 -- :NanocoderSend routing -------------------------------------------------
 
 ---Capture send_prompt messages sent to the companion.
