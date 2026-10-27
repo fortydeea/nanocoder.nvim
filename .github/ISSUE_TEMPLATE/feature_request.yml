@@ -1,0 +1,47 @@
+name: Feature request
+description: Propose a change or new capability
+labels: ["enhancement"]
+body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I searched existing issues and the README for this already
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that the plugin can't?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should the plugin do instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds or other approaches you tried.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Context, mockups, links to similar features elsewhere.
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: This stays zero-dependency and pure Lua (Neovim 0.8+)
+          required: true
