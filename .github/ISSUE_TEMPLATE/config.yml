@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / help
+    url: https://github.com/Nano-Collective/nanocoder/discussions
+    about: Usage questions and general discussion, not bugs.
+  - name: nanocoder CLI issues
+    url: https://github.com/Nano-Collective/nanocoder/issues
+    about: Problems with the agent/CLI itself belong upstream, not here.

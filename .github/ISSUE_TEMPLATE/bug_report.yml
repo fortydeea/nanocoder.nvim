@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in nanocoder.nvim misbehaves
+labels: ["bug"]
+body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I searched existing issues for duplicates
+          required: true
+        - label: I tested with the latest `main` (or the latest release)
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Expected vs. actual behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps starting from `nvim`. Include the relevant `setup()` config if it matters.
+      placeholder: |
+        1. `nvim` with the config below
+        2. `:Nanocoder`
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: nvim-version
+    attributes:
+      label: Neovim version
+      description: "`nvim --version` first line"
+      placeholder: "NVIM v0.10.2"
+    validations:
+      required: true
+
+  - type: input
+    id: cli-version
+    attributes:
+      label: nanocoder CLI version
+      description: "`nanocoder --version`"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: Relevant lines from the log (default `stdpath("cache")/nanocoder.log`, or your `log_file`). Delete sensitive content first.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: OS, terminal, plugin manager, screenshots — whatever helps.
