@@ -92,7 +92,9 @@ the plugin auto-starts the companion connection.
    it. Or `:NanocoderAdd` for a file/range, `:NanocoderTreeAdd` from a file
    tree.
 3. **Review diffs**: proposed changes open as native diffs — `:w` accepts,
-   `:q` rejects.
+   `:q` rejects. If the target buffer has unsaved changes, you are asked
+   first: **Save** writes them, **Show unsaved** diffs against them as-is,
+   **Cancel** rejects the proposed change.
 
 ## Commands
 

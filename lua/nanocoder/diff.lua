@@ -40,16 +40,17 @@ local function fire_user(name, data)
   vim.api.nvim_exec_autocmds("User", { pattern = name, data = data })
 end
 
----Whether a buffer named `path` already exists (so we must not delete it later).
+---The buffer named `path`, when the user already has one (so we must neither
+---delete it later nor reload it with :edit).
 ---@param path string
----@return boolean
+---@return integer|nil
 local function buffer_for_path(path)
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if vim.api.nvim_buf_get_name(buf) == path then
-      return true
+      return buf
     end
   end
-  return false
+  return nil
 end
 
 ---Put the diff's left window back on the buffer it showed before the diff
@@ -163,6 +164,34 @@ function M.open(msg)
     return true
   end
 
+  local old_path = msg.old_file_path or msg.filePath
+  local new_path = msg.new_file_path or msg.filePath
+  local is_new = (msg.originalContent == "") and (msg.newContent ~= "")
+
+  -- Unsaved changes in the target buffer: ask before anything is touched (a
+  -- cancelled prompt must leave the editor as it was). Cancel rejects the
+  -- change so the CLI is not left waiting for an outcome.
+  if not is_new then
+    local existing = buffer_for_path(old_path)
+    if existing and vim.bo[existing].modified then
+      local choice = vim.fn.confirm(old_path .. " has unsaved changes", "&Save\nShow &unsaved\n&Cancel", 1)
+      if choice == 1 then
+        local ok, err = pcall(vim.api.nvim_buf_call, existing, function()
+          vim.cmd("write")
+        end)
+        if not ok then
+          log.warn("could not save " .. old_path .. ": " .. tostring(err))
+          client.send(protocol.reject_change(msg.id))
+          return false
+        end
+      elseif choice ~= 2 then
+        log.info("diff cancelled for " .. old_path)
+        client.send(protocol.reject_change(msg.id))
+        return false
+      end
+    end
+  end
+
   -- If the cursor is inside a proposed diff window, return to the window that
   -- diff was opened from first. Building the next layout from a diff window
   -- would make that window the left side and fire BufWinLeave (auto-reject)
@@ -176,10 +205,11 @@ function M.open(msg)
     end
   end
 
-  -- The diff's left side is built with :edit in the current window. That must
-  -- never be the terminal (the :edit would replace the terminal buffer) nor a
-  -- sidebar like neo-tree (its window would be hijacked). Only a normal file
-  -- window can host the diff: move to one, or split one off.
+  -- The diff's left side is built by swapping this window to the file's
+  -- buffer. That must never be the terminal (the swap would replace the
+  -- terminal buffer) nor a sidebar like neo-tree (its window would be
+  -- hijacked). Only a normal file window can host the diff: move to one, or
+  -- split one off.
   local term_buf = terminal.get_bufnr()
   ---@param win integer|nil
   local function usable(win)
@@ -232,15 +262,11 @@ function M.open(msg)
     end
   end
 
-  local old_path = msg.old_file_path or msg.filePath
-  local new_path = msg.new_file_path or msg.filePath
-  local is_new = (msg.originalContent == "") and (msg.newContent ~= "")
-
   -- Left side: the current file on disk (or an empty buffer for new files).
   local left_buf
   local left_owned
   local left_win = vim.api.nvim_get_current_win()
-  -- Remember what this window showed before :edit hijacks it, so cleanup can
+  -- Remember what this window showed before the swap hijacks it, so cleanup can
   -- hand the window back instead of closing it (a closed window would let the
   -- terminal absorb the freed width).
   local prev_buf = vim.api.nvim_win_get_buf(left_win)
@@ -249,11 +275,14 @@ function M.open(msg)
     left_owned = true
     vim.api.nvim_buf_set_name(left_buf, old_path .. " (current)")
   else
-    -- :edit creates a new buffer when the file was not open before; that one
-    -- is ours to drop later. A buffer the user already had stays untouched.
-    left_owned = not buffer_for_path(old_path)
-    vim.cmd("edit " .. vim.fn.fnameescape(old_path))
-    left_buf = vim.api.nvim_get_current_buf()
+    -- A buffer the user already had is shown as-is (unsaved changes included;
+    -- :edit on it would fail with E37 and abort the diff). A buffer we load
+    -- ourselves is ours to drop later.
+    local existing = buffer_for_path(old_path)
+    left_owned = not existing
+    left_buf = existing or vim.fn.bufadd(old_path)
+    vim.fn.bufload(left_buf)
+    vim.api.nvim_win_set_buf(left_win, left_buf)
     vim.cmd("diffthis")
   end
 

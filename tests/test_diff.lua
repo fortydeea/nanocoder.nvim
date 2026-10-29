@@ -427,3 +427,101 @@ test("with the terminal focused, a sidebar is skipped in favor of a file window"
   pcall(vim.api.nvim_buf_delete, term_buf, { force = true })
   pcall(vim.api.nvim_buf_delete, side_buf, { force = true })
 end)
+
+test("a dirty buffer prompts and Save writes it before the diff opens", function()
+  capture()
+  config.setup({})
+  diff.setup()
+  local tmp = vim.fn.tempname() .. ".lua"
+  vim.fn.writefile({ "a" }, tmp)
+  vim.cmd("edit " .. vim.fn.fnameescape(tmp))
+  local user_buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(user_buf, 0, -1, false, { "dirty" })
+  local asked = 0
+  local orig_confirm = vim.fn.confirm
+  vim.fn.confirm = function()
+    asked = asked + 1
+    return 1 -- &Save
+  end
+
+  eq(true, diff.open(file_change_msg("p1", tmp, "a\n", "b\n")))
+  vim.fn.confirm = orig_confirm
+
+  eq(1, asked, "the buffer's unsaved changes must prompt")
+  eq(false, vim.bo[user_buf].modified, "Save must write the buffer")
+  eq({ "dirty" }, vim.fn.readfile(tmp), "the buffer content must reach the disk")
+  eq(1, diff.pending_count(), "the diff must be open")
+
+  diff.close_all("test cleanup")
+end)
+
+test("a dirty buffer and Show unsaved keeps the edits and still opens the diff", function()
+  capture()
+  config.setup({})
+  diff.setup()
+  local tmp = vim.fn.tempname() .. ".lua"
+  vim.fn.writefile({ "a" }, tmp)
+  vim.cmd("edit " .. vim.fn.fnameescape(tmp))
+  local user_buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(user_buf, 0, -1, false, { "dirty" })
+  local orig_confirm = vim.fn.confirm
+  vim.fn.confirm = function()
+    return 2 -- Show &unsaved
+  end
+
+  -- Regression: a bare :edit on the modified buffer failed with E37 and the
+  -- diff silently never opened. Reusing the buffer must open it anyway.
+  eq(true, diff.open(file_change_msg("p2", tmp, "a\n", "b\n")))
+  vim.fn.confirm = orig_confirm
+
+  eq(true, vim.bo[user_buf].modified, "unsaved edits must survive")
+  eq({ "a" }, vim.fn.readfile(tmp), "the buffer must not be written")
+  eq(user_buf, diff._pending.p2.left_bufnr, "the diff must show the user's buffer")
+
+  diff.deny("p2")
+  eq(true, vim.api.nvim_buf_is_valid(user_buf), "the user's buffer must survive")
+end)
+
+test("a dirty buffer and Cancel rejects the change and opens nothing", function()
+  capture()
+  config.setup({})
+  diff.setup()
+  local tmp = vim.fn.tempname() .. ".lua"
+  vim.fn.writefile({ "a" }, tmp)
+  vim.cmd("edit " .. vim.fn.fnameescape(tmp))
+  local user_buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(user_buf, 0, -1, false, { "dirty" })
+  local orig_confirm = vim.fn.confirm
+  vim.fn.confirm = function()
+    return 3 -- &Cancel
+  end
+
+  eq(false, diff.open(file_change_msg("p3", tmp, "a\n", "b\n")))
+  vim.fn.confirm = orig_confirm
+
+  eq(0, diff.pending_count(), "no diff must open")
+  eq(1, count_type("reject_change"), "the change must be rejected")
+  eq("p3", first_type("reject_change").id)
+  eq(true, vim.bo[user_buf].modified, "the buffer must stay untouched")
+
+  pcall(vim.api.nvim_buf_delete, user_buf, { force = true })
+end)
+
+test("a clean buffer opens the diff without prompting", function()
+  capture()
+  config.setup({})
+  diff.setup()
+  local tmp = vim.fn.tempname() .. ".lua"
+  vim.fn.writefile({ "a" }, tmp)
+  vim.cmd("edit " .. vim.fn.fnameescape(tmp))
+  local orig_confirm = vim.fn.confirm
+  vim.fn.confirm = function()
+    error("confirm must not be called for a clean buffer")
+  end
+
+  eq(true, diff.open(file_change_msg("p4", tmp, "a\n", "b\n")))
+  vim.fn.confirm = orig_confirm
+
+  eq(1, diff.pending_count())
+  diff.deny("p4")
+end)
