@@ -199,3 +199,25 @@ test("native provider honors split_direction = botright (horizontal)", function(
   terminal.stop_job()
   config.setup({})
 end)
+
+-- The cursor guard: a repaint rebuilds the transcript, so the cursor keeps its
+-- distance from the end of the buffer. The tail stays at the tail and a cursor
+-- the user scrolled up stays exactly where they put it.
+local line_for = terminal._cursor_line_for
+
+test("cursor guard: a cursor at the tail stays at the tail", function()
+  -- Offset 0 means "on the last line", whatever the line count is.
+  eq(80, line_for(80, 0))
+  eq(45, line_for(45, 0))
+end)
+
+test("cursor guard: a cursor scrolled up keeps its distance from the end", function()
+  -- The user moved 3 lines up from a 46-line transcript.
+  eq(43, line_for(46, 3))
+  -- A repaint leaves a different line count; the distance must survive.
+  eq(39, line_for(42, 3))
+end)
+
+test("cursor guard: the restored line never goes above the first line", function()
+  eq(1, line_for(2, 10))
+end)
