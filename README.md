@@ -4,6 +4,11 @@ Pure-Lua Neovim extension for the [nanocoder](https://github.com/Nano-Collective
 coding agent. This project was heavily modeled the approach in `coder/claudecode.nvim`.
 Zero dependencies, Neovim 0.8+.
 
+**Keep the TUI you already like.** If you prefer Nanocoder's native
+Ink terminal interface, this plugin lets you stay in it: no reimplementation,
+no imitation, no separate chat pane. Neovim hosts the real nanocoder TUI in a
+`:terminal` window and wires it to your editor.
+
 nanocoder runs in a `:terminal` window and starts a local WebSocket companion
 (`nanocoder --vscode`). This plugin connects to that companion as a WebSocket
 client and shares editor context both ways: your selection and diagnostics go
@@ -13,6 +18,12 @@ accept or reject.
 > **How it works, in one line**: the CLI hosts the server and writes a
 > discovery file; this plugin reads it and connects. The inverse of the
 > Claude Code protocol. See [PROTOCOL.md](PROTOCOL.md) for the full spec.
+
+> **This is legacy companion mode, not ACP.** This plugin uses the legacy
+> companion protocol (`nanocoder --vscode`, WebSocket + `vscode-server.json`)
+> and does **not** use the Agent Client Protocol (ACP). The UI is nanocoder's
+> own native Ink TUI, running inside Neovim's `:terminal` — this plugin does
+> not render its own interface.
 
 ## Requirements
 
@@ -86,7 +97,10 @@ the plugin auto-starts the companion connection.
 
 ## Usage
 
-1. **Launch**: `:Nanocoder` opens a terminal running `nanocoder --vscode`.
+1. **Launch**: `:Nanocoder` opens a terminal running `nanocoder --vscode`
+   (legacy companion mode, not ACP). The interface you see is nanocoder's own
+   native Ink TUI; the plugin only hosts it in a `:terminal` and talks to the
+   companion socket.
 2. **Send context**: select text and press `<leader>as` — the terminal is
    prefilled with `@file#L{start}-L{end}` and you type the instruction after
    it. Or `:NanocoderAdd` for a file/range, `:NanocoderTreeAdd` from a file
