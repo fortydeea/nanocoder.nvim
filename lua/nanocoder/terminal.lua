@@ -34,8 +34,93 @@ end
 
 local native = {}
 
+---Buffers already being followed, so a reattach never stacks a second handler.
+local following_bufs = {}
+
 function native.is_available()
   return true
+end
+
+---Hold the normal-mode cursor where the user left it while the CLI repaints.
+---The CLI appends output and clears its saved lines (CSI 2J/3J/H). Each clear
+---removes the lines above the cursor and Neovim answers by shifting it up the
+---buffer, so the transcript creeps past it and the cursor walks to line 1.
+---A repaint rebuilds the same transcript, so the one thing that survives it is
+---the cursor's distance from the end of the buffer. Restoring that distance
+---keeps the tail at the tail and leaves a cursor the user scrolled up exactly
+---where they put it.
+---@param buf integer terminal buffer
+---@param win integer window showing it
+local function hold_row(buf, win)
+  if following_bufs[buf] then
+    return
+  end
+  following_bufs[buf] = true
+  local offset = 0 -- lines between the cursor and the last line
+  local scheduled = false
+
+  local function attached()
+    return vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == buf
+  end
+
+  local function record()
+    offset = vim.api.nvim_buf_line_count(buf) - vim.api.nvim_win_get_cursor(win)[1]
+  end
+
+  -- CursorMoved does not fire for cursor changes inside a terminal buffer, so
+  -- watch the keys instead: a key in normal mode is the only way the user can
+  -- move the cursor here.
+  local ns = vim.api.nvim_create_namespace("nanocoder_terminal_cursor")
+  vim.on_key(function()
+    if vim.api.nvim_get_current_buf() ~= buf then
+      return
+    end
+    vim.schedule(function()
+      if attached() and vim.api.nvim_get_mode().mode:sub(1, 1) == "n" then
+        record()
+      end
+    end)
+  end, ns)
+
+  vim.api.nvim_buf_attach(buf, false, {
+    -- on_bytes reports byte edits only, so drops at the top of the buffer are
+    -- only visible here.
+    on_lines = function(_, _, _, first, last, new_last)
+      if not attached() or scheduled then
+        return
+      end
+
+      local dropped = first == 0 and math.max(last - new_last, 0) or 0
+      local count = vim.api.nvim_buf_line_count(buf)
+      local line = vim.api.nvim_win_get_cursor(win)[1]
+      if dropped == 0 or M._cursor_line_for(count, offset) == line then
+        return
+      end
+
+      scheduled = true
+      local moved = line
+      -- Setting the cursor inside the callback does not stick: Neovim shifts it
+      -- again once the redraw finishes, so defer to the main loop. One restore
+      -- covers a burst of drops because it re-reads the buffer when it runs.
+      vim.schedule(function()
+        scheduled = false
+        if not attached() or vim.api.nvim_get_mode().mode:sub(1, 1) == "t" then
+          return
+        end
+        -- A different line means the user moved the cursor in the meantime,
+        -- and that is their view to keep.
+        if vim.api.nvim_win_get_cursor(win)[1] ~= moved then
+          return
+        end
+        local now = vim.api.nvim_buf_line_count(buf)
+        pcall(vim.api.nvim_win_set_cursor, win, { M._cursor_line_for(now, offset), 0 })
+      end)
+    end,
+    on_detach = function()
+      vim.on_key(nil, ns)
+      following_bufs[buf] = nil
+    end,
+  })
 end
 
 ---True when a job id refers to a job that has not exited yet.
@@ -94,6 +179,7 @@ function native.open(cfg, focus)
   if alive and state.bufnr and vim.api.nvim_buf_is_valid(state.bufnr) then
     vim.api.nvim_win_set_buf(win, state.bufnr)
     state.winid = win
+    hold_row(state.bufnr, win)
     if term.auto_insert and focus ~= false then
       vim.cmd("startinsert")
     end
@@ -130,6 +216,8 @@ function native.open(cfg, focus)
   state.bufnr = buf
   state.winid = win
   state.job_id = job_id
+
+  hold_row(buf, win)
 
   if term.auto_insert and focus ~= false then
     vim.cmd("startinsert")
@@ -439,6 +527,15 @@ end
 ---@return string provider name for diagnostics
 function M.get_provider_name()
   return state.provider_name or "native"
+end
+
+---Line to put the cursor on so its distance from the end of the transcript is
+---preserved across a repaint. Exposed for tests.
+---@param count integer line count after a drop
+---@param offset integer lines between the cursor and the last line
+---@return integer
+function M._cursor_line_for(count, offset)
+  return math.max(1, count - offset)
 end
 
 return M
