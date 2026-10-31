@@ -2,14 +2,14 @@
 local config = require("nanocoder.config")
 local terminal = require("nanocoder.terminal")
 
-test("build_cli_argv: nanocoder --vscode by default", function()
+test("build_cli_argv: nanocoder --vscode --no-alt-screen by default", function()
   config.setup({})
-  eq({ "nanocoder", "--vscode" }, terminal.build_cli_argv())
+  eq({ "nanocoder", "--vscode", "--no-alt-screen" }, terminal.build_cli_argv())
 end)
 
 test("build_cli_argv: honors terminal_cmd", function()
   config.setup({ terminal_cmd = "/opt/nanocoder/bin/nanocoder" })
-  eq({ "/opt/nanocoder/bin/nanocoder", "--vscode" }, terminal.build_cli_argv())
+  eq({ "/opt/nanocoder/bin/nanocoder", "--vscode", "--no-alt-screen" }, terminal.build_cli_argv())
 end)
 
 test("setup selects the native provider by default", function()

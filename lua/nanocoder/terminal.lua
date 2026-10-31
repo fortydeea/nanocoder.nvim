@@ -19,12 +19,13 @@ local state = {
 }
 
 ---Launch arguments for the CLI. `nanocoder --vscode` starts the companion
----WebSocket server the plugin then dials into.
+---WebSocket server the plugin then dials into. `--no-alt-screen` keeps the TUI
+---inline so the terminal buffer stays ordinary scrollback the plugin can read.
 ---@param cfg table|nil
 ---@return string[] argv
 function M.build_cli_argv(cfg)
   cfg = cfg or config.get()
-  local argv = { cfg.terminal_cmd or "nanocoder", "--vscode" }
+  local argv = { cfg.terminal_cmd or "nanocoder", "--vscode", "--no-alt-screen" }
   return argv
 end
 
@@ -356,7 +357,7 @@ local none = {
     return true
   end,
   open = function()
-    log.info("terminal provider is 'none'; start `nanocoder --vscode` yourself")
+    log.info("terminal provider is 'none'; start `nanocoder --vscode --no-alt-screen` yourself")
     return false
   end,
   close = function() end,

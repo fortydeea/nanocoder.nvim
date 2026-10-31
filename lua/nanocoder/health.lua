@@ -73,7 +73,7 @@ function M.check()
     if cfg.port and cfg.token then
       h_ok("manual port/token configured (discovery file not needed)")
     else
-      h_warn("run `nanocoder --vscode` (or :NanocoderStart) to create the discovery file")
+      h_warn("run `nanocoder --vscode --no-alt-screen` (or :NanocoderStart) to create the discovery file")
     end
   end
 
