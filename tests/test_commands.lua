@@ -56,7 +56,7 @@ end
 
 test("SelectModel: cancelling the first prompt changes nothing", function()
   config.setup({})
-  terminal.set_cli_argv({ "nanocoder", "--vscode" })
+  terminal.set_cli_argv({ "nanocoder", "--vscode", "--no-alt-screen" })
   local record = {}
   with_input({ CANCEL }, function()
     with_lifecycle(record, function()
@@ -64,7 +64,7 @@ test("SelectModel: cancelling the first prompt changes nothing", function()
     end)
   end)
   eq({}, record)
-  eq({ "nanocoder", "--vscode" }, terminal.get_cli_argv())
+  eq({ "nanocoder", "--vscode", "--no-alt-screen" }, terminal.get_cli_argv())
 end)
 
 test("SelectModel: cancelling the second prompt changes nothing", function()
@@ -75,7 +75,7 @@ test("SelectModel: cancelling the second prompt changes nothing", function()
     end)
   end)
   eq({}, record)
-  eq({ "nanocoder", "--vscode" }, terminal.get_cli_argv())
+  eq({ "nanocoder", "--vscode", "--no-alt-screen" }, terminal.get_cli_argv())
 end)
 
 test("SelectModel: empty selection on the default argv does not relaunch", function()
@@ -91,7 +91,7 @@ test("SelectModel: empty selection on the default argv does not relaunch", funct
   end)
   terminal.is_running = orig_running
   eq({}, record)
-  eq({ "nanocoder", "--vscode" }, terminal.get_cli_argv())
+  eq({ "nanocoder", "--vscode", "--no-alt-screen" }, terminal.get_cli_argv())
 end)
 
 test("SelectModel: empty selection on a custom argv resets to the default", function()
@@ -103,7 +103,7 @@ test("SelectModel: empty selection on a custom argv resets to the default", func
     end)
   end)
   eq({ "stop", "start" }, record)
-  eq({ "nanocoder", "--vscode" }, terminal.get_cli_argv())
+  eq({ "nanocoder", "--vscode", "--no-alt-screen" }, terminal.get_cli_argv())
 end)
 
 test("SelectModel: a real change relaunches once with the selected argv", function()
@@ -114,14 +114,14 @@ test("SelectModel: a real change relaunches once with the selected argv", functi
     end)
   end)
   eq({ "stop", "start" }, record)
-  eq({ "nanocoder", "--vscode", "--provider", "openai", "--model", "gpt-5" }, terminal.get_cli_argv())
-  terminal.set_cli_argv({ "nanocoder", "--vscode" })
+  eq({ "nanocoder", "--vscode", "--no-alt-screen", "--provider", "openai", "--model", "gpt-5" }, terminal.get_cli_argv())
+  terminal.set_cli_argv({ "nanocoder", "--vscode", "--no-alt-screen" })
 end)
 
 -- :NanocoderContinue / :NanocoderResume / :NanocoderRestart --------------
 
 test("Continue: relaunches with the one-shot --continue flag", function()
-  terminal.set_cli_argv({ "nanocoder", "--vscode" })
+  terminal.set_cli_argv({ "nanocoder", "--vscode", "--no-alt-screen" })
   terminal.set_session_args(nil)
   local record = {}
   with_lifecycle(record, function()
@@ -163,11 +163,11 @@ test("Restart: relaunches without session flags", function()
 end)
 
 test("take_cli_argv consumes the session flags exactly once", function()
-  terminal.set_cli_argv({ "nanocoder", "--vscode" })
+  terminal.set_cli_argv({ "nanocoder", "--vscode", "--no-alt-screen" })
   terminal.set_session_args({ "--continue" })
-  eq({ "nanocoder", "--vscode", "--continue" }, terminal.take_cli_argv())
+  eq({ "nanocoder", "--vscode", "--no-alt-screen", "--continue" }, terminal.take_cli_argv())
   eq(nil, terminal.get_session_args())
-  eq({ "nanocoder", "--vscode" }, terminal.take_cli_argv())
+  eq({ "nanocoder", "--vscode", "--no-alt-screen" }, terminal.take_cli_argv())
 end)
 
 -- :NanocoderSend routing -------------------------------------------------

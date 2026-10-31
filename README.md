@@ -97,10 +97,12 @@ the plugin auto-starts the companion connection.
 
 ## Usage
 
-1. **Launch**: `:Nanocoder` opens a terminal running `nanocoder --vscode`
-   (legacy companion mode, not ACP). The interface you see is nanocoder's own
-   native Ink TUI; the plugin only hosts it in a `:terminal` and talks to the
-   companion socket.
+1. **Launch**: `:Nanocoder` opens a terminal running
+   `nanocoder --vscode --no-alt-screen` (legacy companion mode, not ACP).
+   `--no-alt-screen` keeps the TUI inline instead of on the alternate screen
+   buffer, so the transcript stays in normal scrollback. The interface you see
+   is nanocoder's own native Ink TUI; the plugin only hosts it in a `:terminal`
+   and talks to the companion socket.
 2. **Send context**: select text and press `<leader>as` — the terminal is
    prefilled with `@file#L{start}-L{end}` and you type the instruction after
    it. Or `:NanocoderAdd` for a file/range, `:NanocoderTreeAdd` from a file
@@ -181,7 +183,7 @@ is_new_file, diff_window, target_window, terminal_window, tab_number),
 
 - `native` (default) — built-in `:terminal` in a split
 - `external` — spawn a terminal app (set `provider_opts.external_terminal_cmd`)
-- `none` — no terminal at all (you run `nanocoder --vscode` yourself)
+- `none` — no terminal at all (you run `nanocoder --vscode --no-alt-screen` yourself)
 - custom table — implement `open`, `close`, `focus`, `is_open`, `send_text`
 
 ## Troubleshooting
